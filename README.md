@@ -56,8 +56,8 @@
 #### 2. 安装与启动
 ```bash
 # 克隆代码
-git clone https://github.com/CSY656/---.git
-cd ---
+git clone https://github.com/CSY656/fenbi-helper.git
+cd fenbi-helper
 
 # 安装依赖
 npm install
