@@ -128,24 +128,35 @@
             r.innerHTML = '';
             for (let data of datas) {
                 let div = document.createElement('div');
-                div.style = 'margin: 20px auto 0; width: 700px;'
-                let item = document.createElement('div')
-                item.className='his-item';
-                item.onclick = (e) => {
-                    window.open(`/question/${data.questionId}`, "_blank");
-                }
+                div.style = 'margin: 20px auto 0; width: 700px;';
+                let item = document.createElement('div');
+                item.className = 'his-item';
+                item.onclick = () => {
+                    window.open(`/question/${encodeURIComponent(data.questionId)}`, "_blank");
+                };
                 div.appendChild(item);
-                let title = document.createElement('div')
-                title.className='his-title';
-                let s = '';
-                for (let source of data.sourceList) {
-                    s += `<li style="list-style: none;">${source}</li>`
-                }
-                title.innerHTML = s;
+
+                let title = document.createElement('div');
+                title.className = 'his-title';
+                (data.sourceList || []).forEach(source => {
+                    let li = document.createElement('li');
+                    li.style.listStyle = 'none';
+                    li.textContent = source;
+                    title.appendChild(li);
+                });
                 item.appendChild(title);
+
                 let content = document.createElement('div');
-                content.className = 'searchContentText'
-                content.innerHTML = data.stemSnippet_;
+                content.className = 'searchContentText';
+                const tpl = document.createElement('template');
+                tpl.innerHTML = data.stemSnippet_ || '';
+                tpl.content.querySelectorAll('script, iframe, object, embed, style').forEach(el => el.remove());
+                tpl.content.querySelectorAll('*').forEach(el => {
+                    Array.from(el.attributes).forEach(attr => {
+                        if (attr.name.toLowerCase().startsWith('on')) el.removeAttribute(attr.name);
+                    });
+                });
+                content.appendChild(tpl.content);
                 item.appendChild(content);
                 r.appendChild(div);
             }

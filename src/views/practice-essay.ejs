@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>粉笔刷题 - 申论研习与 AI 智能批改</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: #f5f7fa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #333;
+            min-height: 100vh;
+        }
+        .nav-bar {
+            background: #fff;
+            padding: 12px 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .nav-brand {
+            font-size: 17px;
+            font-weight: 600;
+            color: #1890ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .nav-btn {
+            text-decoration: none;
+            color: #555;
+            font-size: 14px;
+            border: 1px solid #d9d9d9;
+            padding: 5px 14px;
+            background-color: #fff;
+            border-radius: 4px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .nav-btn:hover {
+            color: #1890ff;
+            border-color: #1890ff;
+            background-color: #e6f7ff;
+        }
+        .nav-btn.active {
+            color: #fff;
+            background-color: #1890ff;
+            border-color: #1890ff;
+        }
+
+        /* 顶部题型导航条 */
+        .sub-nav {
+            background: #fff;
+            padding: 10px 24px;
+            border-top: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .type-tabs {
+            display: flex;
+            gap: 8px;
+        }
+        .type-btn {
+            padding: 5px 12px;
+            font-size: 13px;
+            border: 1px solid #e8e8e8;
+            background: #fafafa;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            color: #595959;
+            transition: all 0.2s;
+        }
+        .type-btn:hover, .type-btn.active {
+            border-color: #1890ff;
+            color: #1890ff;
+            background: #e6f7ff;
+        }
+
+        /* 主体分栏容器 */
+        .workspace {
+            display: flex;
+            height: calc(100vh - 110px);
+            padding: 16px 24px 20px;
+            gap: 20px;
+        }
+
+        /* 左侧材料栏 */
+        .material-col {
+            flex: 1.1;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .col-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fafafa;
+        }
+        .material-body {
+            flex: 1;
+            padding: 20px 24px;
+            overflow-y: auto;
+            line-height: 1.85;
+            font-size: 15px;
+            color: #333;
+        }
+        .material-card {
+            background: #fff;
+            border: 1px solid #ebebeb;
+            border-radius: 8px;
+            padding: 16px 18px;
+            margin-bottom: 18px;
+        }
+        .material-num {
+            font-weight: 600;
+            color: #d46b08;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .hl-marker {
+            background-color: #ffe58f;
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+
+        /* 右侧答题纸与批改区 */
+        .answer-col {
+            flex: 1.2;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .question-box {
+            padding: 16px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            background: #fdfdfd;
+        }
+        .q-title {
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.6;
+            color: #262626;
+            margin-bottom: 8px;
+        }
+        .q-req {
+            font-size: 13px;
+            color: #ff4d4f;
+            line-height: 1.5;
+        }
+
+        /* 答题纸区域 */
+        .editor-wrapper {
+            flex: 1;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .essay-textarea {
+            width: 100%;
+            flex: 1;
+            min-height: 280px;
+            padding: 14px 16px;
+            font-size: 15px;
+            line-height: 1.8;
+            font-family: "PingFang SC", "Microsoft YaHei", monospace;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            outline: none;
+            resize: none;
+            transition: all 0.2s;
+            background: #fafbfd;
+        }
+        .essay-textarea:focus {
+            border-color: #40a9ff;
+            background: #fff;
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
+        }
+
+        /* 字数与控制条 */
+        .action-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-top: 1px solid #f0f0f0;
+            background: #fafafa;
+        }
+        .word-stats {
+            font-size: 14px;
+            color: #595959;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .word-current {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1890ff;
+        }
+        .word-current.warning {
+            color: #fa8c16;
+        }
+        .word-current.over {
+            color: #f5222d;
+        }
+
+        .btn-grade {
+            background: linear-gradient(135deg, #1890ff, #096dd9);
+            color: #fff;
+            border: none;
+            padding: 9px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-grade:hover {
+            opacity: 0.92;
+            box-shadow: 0 2px 8px rgba(24, 144, 255, 0.35);
+        }
+        .btn-grade:disabled {
+            background: #bfbfbf;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* 批改报告视窗浮层/抽屉 */
+        .report-section {
+            display: none;
+            margin-top: 16px;
+            border-top: 2px dashed #e8e8e8;
+            padding-top: 16px;
+        }
+        .score-card {
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            margin-bottom: 16px;
+        }
+        .score-num {
+            font-size: 32px;
+            font-weight: 700;
+            color: #389e0d;
+        }
+        .rating-badge {
+            background: #52c41a;
+            color: #fff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+        .point-item {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        .point-hit {
+            background: #f6ffed;
+            border: 1px solid #d9f7be;
+            color: #237804;
+        }
+        .point-miss {
+            background: #fff1f0;
+            border: 1px solid #ffa39e;
+            color: #cf1322;
+        }
+        .upgraded-box {
+            background: #f0f5ff;
+            border: 1px solid #d6e4ff;
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #1d39c4;
+            margin-top: 12px;
+            white-space: pre-wrap;
+        }
+        .ref-box {
+            background: #fffbe6;
+            border: 1px solid #ffe58f;
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #d46b08;
+            margin-top: 12px;
+            white-space: pre-wrap;
+        }
+        .tab-toggle {
+            cursor: pointer;
+            color: #1890ff;
+            font-size: 13px;
+            text-decoration: underline;
+        }
+        .engine-banner {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .engine-llm {
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            color: #0050b3;
+        }
+        .engine-fallback {
+            background: #fff2e8;
+            border: 1px solid #ffbb96;
+            color: #d4380d;
+        }
+        .engine-kb {
+            background: #fafafa;
+            border: 1px solid #d9d9d9;
+            color: #595959;
+        }
+        .breakdown-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+        .breakdown-pill {
+            background: #f5f7fa;
+            border: 1px solid #e8e8e8;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #555;
+        }
+        .history-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .history-modal {
+            width: 680px;
+            max-width: 92vw;
+            max-height: 82vh;
+            background: #fff;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+        }
+        .history-item {
+            border: 1px solid #ececec;
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .history-item:hover {
+            border-color: #1890ff;
+            background: #f7fbff;
+        }
+    </style>
+</head>
+<body>
+
+<div class="nav-bar">
+    <div class="nav-brand">
+        <span>粉笔刷题 - 申论真题研习与 AI 智能批改</span>
+    </div>
+    <div class="nav-links">
+        <a href="/history-category-complex" class="nav-btn">分类看板</a>
+        <a href="/history" class="nav-btn">列表视图</a>
+        <a href="/practice/xingce" class="nav-btn">行测刷题</a>
+        <a href="/practice/essay" class="nav-btn active">申论 AI 批改</a>
+        <a href="/search" target="_blank" class="nav-btn">搜索习题</a>
+        <a href="/calc" target="_blank" class="nav-btn">速算工具</a>
+        <a href="/setup" class="nav-btn">账号 / 模型配置</a>
+    </div>
+</div>
+
+<div class="sub-nav">
+    <div class="type-tabs">
+        <a href="/practice/essay?type=all" class="type-btn <%= currentType === 'all' ? 'active' : '' %>">全部题目</a>
+        <a href="/practice/essay?type=summary" class="type-btn <%= currentType === 'summary' ? 'active' : '' %>">归纳概括 (单一题)</a>
+        <a href="/practice/essay?type=analysis" class="type-btn <%= currentType === 'analysis' ? 'active' : '' %>">综合分析</a>
+        <a href="/practice/essay?type=countermeasure" class="type-btn <%= currentType === 'countermeasure' ? 'active' : '' %>">提出对策</a>
+        <a href="/practice/essay?type=official_doc" class="type-btn <%= currentType === 'official_doc' ? 'active' : '' %>">公文写作</a>
+        <a href="/practice/essay?type=essay" class="type-btn <%= currentType === 'essay' ? 'active' : '' %>">文章写作 (大作文)</a>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <button type="button" class="type-btn" onclick="openEssayHistory()">历史批改记录</button>
+        <select id="examSelect" onchange="switchQuestion()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #d9d9d9; font-size: 13px;">
+            <% for (let q of questionList) { %>
+                <option value="<%= q.id %>" <%= q.id === currentQuestion.id ? 'selected' : '' %>>
+                    <%= q.typeName %> - <%= q.examName %>
+                </option>
+            <% } %>
+        </select>
+    </div>
+</div>
+
+<div class="workspace">
+    <!-- 左栏：材料阅读区 -->
+    <div class="material-col">
+        <div class="col-header">
+            <span>给定参考资料 (选中文本可高亮标记)</span>
+            <button onclick="clearHighlights()" style="border: none; background: transparent; color: #888; font-size: 12px; cursor: pointer;">清除高亮</button>
+        </div>
+        <div class="material-body" id="materialArea">
+            <% currentQuestion.materials.forEach((mat, idx) => { %>
+                <div class="material-card">
+                    <div class="material-num">给定资料 <%= idx + 1 %></div>
+                    <p><%- mat.replace(/\n/g, '<br>') %></p>
+                </div>
+            <% }) %>
+        </div>
+    </div>
+
+    <!-- 右栏：全真答题纸与 AI 批改 -->
+    <div class="answer-col">
+        <div class="question-box">
+            <div class="q-title"><%= currentQuestion.title %></div>
+            <div class="q-req"><%= currentQuestion.requirement %>（满分 <%= currentQuestion.maxScore %> 分）</div>
+        </div>
+
+        <div class="editor-wrapper">
+            <textarea id="essayEditor" class="essay-textarea" placeholder="请在此处输入您的申论作答内容...&#10;系统将自动为您统计字数并保存草稿。作答完成后点击下方【AI 智能批改】获取多维专家报告与升格示范。"></textarea>
+
+            <!-- AI 批改结果区 -->
+            <div class="report-section" id="reportSection">
+                <div class="engine-banner" id="engineBanner" style="display: none;"></div>
+                <div class="score-card">
+                    <div>
+                        <div style="font-size: 12px; color: #8c8c8c;">综合得分</div>
+                        <div class="score-num" id="repScore">0 <span style="font-size: 16px; font-weight: normal; color: #666;">/ <%= currentQuestion.maxScore %></span></div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #8c8c8c;">评定等级</div>
+                        <div class="rating-badge" id="repRating">二类文上</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #8c8c8c;">字数情况</div>
+                        <div id="repWordAnalysis" style="font-size: 13px; font-weight: 500; color: #333;">符合要求</div>
+                    </div>
+                </div>
+                <div class="breakdown-row" id="breakdownRow"></div>
+
+                <!-- 采分点比对 -->
+                <div style="margin-bottom: 16px;">
+                    <h4 style="font-size: 14px; margin-bottom: 8px;">采分要点对照诊断</h4>
+                    <div id="checklistArea"></div>
+                </div>
+
+                <!-- 结构与语言点评 -->
+                <div style="margin-bottom: 16px;">
+                    <h4 style="font-size: 14px; margin-bottom: 6px;">结构与语言诊断</h4>
+                    <p id="structureDiag" style="font-size: 13px; color: #555; line-height: 1.6;"></p>
+                    <p id="summaryCommentText" style="font-size: 13px; color: #333; line-height: 1.6; margin-top: 6px;"></p>
+                    <div id="wordingList" style="margin-top: 8px;"></div>
+                </div>
+
+                <!-- 升格重写范文 -->
+                <div>
+                    <h4 style="font-size: 14px; margin-bottom: 6px; color: #1d39c4;">专家升格示范重写</h4>
+                    <div class="upgraded-box" id="upgradedText"></div>
+                </div>
+
+                <!-- 官方参考答案折叠 -->
+                <div style="margin-top: 14px;">
+                    <span class="tab-toggle" onclick="toggleRefAnswer()">查看官方参考答案与名师范文</span>
+                    <div class="ref-box" id="refAnswerBox" style="display: none;"><%- currentQuestion.standardAnswer %></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部字数与触发按钮 -->
+        <div class="action-bar">
+            <div class="word-stats">
+                <span>当前字数：<span class="word-current" id="wordCount">0</span> 字</span>
+                <span style="color: #999;">/ 上限 <%= currentQuestion.maxWords %> 字</span>
+                <span id="draftNotice" style="font-size: 12px; color: #52c41a; display: none;">草稿已自动保存</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-grade" id="gradeBtn" onclick="requestAIGrading()">
+                    <span>AI 智能批改</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 历史批改记录弹窗 -->
+<div class="history-modal-overlay" id="historyModal" onclick="if (event.target === this) closeEssayHistory()">
+    <div class="history-modal">
+        <div class="col-header">
+            <span>申论历史批改记录</span>
+            <button type="button" onclick="closeEssayHistory()" style="border: none; background: transparent; cursor: pointer; font-size: 16px; color: #666;">×</button>
+        </div>
+        <div id="historyModalBody" style="padding: 16px 20px; overflow-y: auto; flex: 1;"></div>
+    </div>
+</div>
+
+<script>
+    const currentQ = <%- JSON.stringify(currentQuestion) %>;
+    const editor = document.getElementById('essayEditor');
+    const wordCounter = document.getElementById('wordCount');
+    const draftNotice = document.getElementById('draftNotice');
+
+    // 本地草稿恢复
+    const draftKey = `essay_draft_${currentQ.id}`;
+    const savedDraft = localStorage.getItem(draftKey);
+    if (savedDraft) {
+        editor.value = savedDraft;
+    }
+    updateWordCount();
+
+    // 实时字数统计与自动暂存
+    editor.addEventListener('input', () => {
+        updateWordCount();
+        localStorage.setItem(draftKey, editor.value);
+        draftNotice.style.display = 'inline';
+        setTimeout(() => { draftNotice.style.display = 'none'; }, 2000);
+    });
+
+    function updateWordCount() {
+        const text = editor.value.replace(/[\r\n\s]/g, ''); // 排除换行和纯空白
+        const len = text.length;
+        wordCounter.innerText = len;
+
+        wordCounter.classList.remove('warning', 'over');
+        if (len > currentQ.maxWords) {
+            wordCounter.classList.add('over');
+        } else if (len > currentQ.maxWords * 0.9) {
+            wordCounter.classList.add('warning');
+        }
+    }
+
+    // 选中文本高亮支持
+    document.getElementById('materialArea').addEventListener('mouseup', () => {
+        const selection = window.getSelection();
+        if (!selection.isCollapsed) {
+            const range = selection.getRangeAt(0);
+            const span = document.createElement('span');
+            span.className = 'hl-marker';
+            try {
+                range.surroundContents(span);
+            } catch (e) {}
+            selection.removeAllRanges();
+        }
+    });
+
+    function clearHighlights() {
+        const markers = document.querySelectorAll('.hl-marker');
+        markers.forEach(m => {
+            const parent = m.parentNode;
+            while (m.firstChild) parent.insertBefore(m.firstChild, m);
+            parent.removeChild(m);
+        });
+    }
+
+    function switchQuestion() {
+        const qid = document.getElementById('examSelect').value;
+        const urlParams = new URLSearchParams(window.location.search);
+        const type = urlParams.get('type') || 'all';
+        window.location.href = `/practice/essay?type=${type}&qid=${qid}`;
+    }
+
+    function toggleRefAnswer() {
+        const box = document.getElementById('refAnswerBox');
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function showToast(msg) {
+        let toast = document.getElementById('toastNotice');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'toastNotice';
+            toast.style = 'position: fixed; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 10px 22px; border-radius: 6px; font-size: 14px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); transition: opacity 0.3s;';
+            document.body.appendChild(toast);
+        }
+        toast.innerText = msg;
+        toast.style.display = 'block';
+        toast.style.opacity = '1';
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => { toast.style.display = 'none'; }, 300);
+        }, 3500);
+    }
+
+    // 调用 AI 智能批改
+    async function requestAIGrading() {
+        const text = editor.value.trim();
+        if (!text) {
+            showToast('请先输入您的申论作答内容！');
+            return;
+        }
+
+        const btn = document.getElementById('gradeBtn');
+        btn.disabled = true;
+        btn.innerHTML = 'AI 正在深度阅卷评分中...';
+
+        try {
+            const res = await fetch('/api/essay/grade', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    questionId: currentQ.id,
+                    questionType: currentQ.type,
+                    questionTitle: currentQ.title,
+                    questionRequirement: currentQ.requirement,
+                    maxScore: currentQ.maxScore,
+                    materials: currentQ.materials,
+                    standardAnswer: currentQ.standardAnswer,
+                    scoringPoints: currentQ.scoringPoints,
+                    userAnswer: text
+                })
+            });
+
+            const data = await res.json();
+            if (data.code === 200 && data.report) {
+                renderReport(data.report, data);
+                if (data.fallback) {
+                    showToast('外部大模型调用失败，已降级为本地知识库规则评分');
+                }
+            } else {
+                showToast(data.message || '批改失败，请先在【账号/模型配置】中配置大模型 API Key');
+            }
+        } catch (e) {
+            showToast('请求失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = 'AI 智能批改';
+        }
+    }
+
+    // 渲染批改报告（纯文本节点防 XSS）
+    function renderReport(report, meta = {}) {
+        const banner = document.getElementById('engineBanner');
+        banner.style.display = 'block';
+        if (meta.fallback) {
+            banner.className = 'engine-banner engine-fallback';
+            banner.textContent = `注意：外部模型调用失败（${meta.fallbackReason || '接口异常'}），本次已自动降级为内置知识库规则评分，可在【账号 / 模型配置】中检查模型设置。`;
+        } else if (meta.engine === 'llm' || report.isEngine === 'llm') {
+            banner.className = 'engine-banner engine-llm';
+            banner.textContent = `本次由外部大模型【${meta.modelUsed || meta.model || 'LLM'}】结合申论阅卷知识库完成深度批改。`;
+        } else {
+            banner.className = 'engine-banner engine-kb';
+            banner.textContent = '当前未配置外部大模型 API Key，本次由内置申论知识库引擎评分；如需深度语义润色，可在【账号 / 模型配置】中接入 DeepSeek / 通义千问等模型。';
+        }
+
+        const repMax = Number(report.maxScore) || currentQ.maxScore;
+        const repScoreEl = document.getElementById('repScore');
+        repScoreEl.textContent = '';
+        repScoreEl.appendChild(document.createTextNode(`${report.totalScore ?? 0} `));
+        const maxSpan = document.createElement('span');
+        maxSpan.style.cssText = 'font-size: 16px; font-weight: normal; color: #666;';
+        maxSpan.textContent = `/ ${repMax}`;
+        repScoreEl.appendChild(maxSpan);
+
+        document.getElementById('repRating').textContent = report.rating || '良好';
+        document.getElementById('repWordAnalysis').textContent = (report.wordCountAnalysis && report.wordCountAnalysis.comment) || '字数符合要求';
+
+        // 分项得分
+        const bdRow = document.getElementById('breakdownRow');
+        bdRow.textContent = '';
+        if (report.scoreBreakdown) {
+            const bd = report.scoreBreakdown;
+            const items = [
+                `采分要点：${bd.keypointsScore ?? 0} / ${bd.keypointsMax ?? '-'}`,
+                `逻辑结构：${bd.structureScore ?? 0} / ${bd.structureMax ?? '-'}`,
+                `语言规范：${bd.languageScore ?? 0} / ${bd.languageMax ?? '-'}`
+            ];
+            items.forEach(txt => {
+                const pill = document.createElement('span');
+                pill.className = 'breakdown-pill';
+                pill.textContent = txt;
+                bdRow.appendChild(pill);
+            });
+        }
+
+        // 采分点
+        const checkArea = document.getElementById('checklistArea');
+        checkArea.textContent = '';
+        if (Array.isArray(report.keypointsChecklist)) {
+            report.keypointsChecklist.forEach(item => {
+                const div = document.createElement('div');
+                div.className = `point-item ${item.hit ? 'point-hit' : 'point-miss'}`;
+
+                const strong = document.createElement('strong');
+                strong.textContent = item.hit ? '【已命中】' : '【未命中/遗漏】';
+                div.appendChild(strong);
+                div.appendChild(document.createTextNode(' '));
+
+                const ptSpan = document.createElement('span');
+                ptSpan.textContent = item.point || '';
+                div.appendChild(ptSpan);
+
+                const anaDiv = document.createElement('div');
+                anaDiv.style.cssText = 'font-size: 12px; margin-top: 3px; opacity: 0.9;';
+                anaDiv.textContent = `点评：${item.analysis || ''}`;
+                div.appendChild(anaDiv);
+
+                checkArea.appendChild(div);
+            });
+        }
+
+        // 结构诊断与总体评价
+        document.getElementById('structureDiag').textContent = report.structureDiagnosis || '条理基本清晰。';
+        document.getElementById('summaryCommentText').textContent = report.summaryComment ? `总体评价：${report.summaryComment}` : '';
+
+        // 语言修润
+        const wordingList = document.getElementById('wordingList');
+        wordingList.textContent = '';
+        if (Array.isArray(report.languageAndWording) && report.languageAndWording.length > 0) {
+            report.languageAndWording.forEach(w => {
+                const p = document.createElement('div');
+                p.style.cssText = 'font-size: 13px; color: #595959; margin-bottom: 4px;';
+
+                p.appendChild(document.createTextNode('• 原文 “'));
+                const origSpan = document.createElement('span');
+                origSpan.style.color = '#cf1322';
+                origSpan.textContent = w.original || '';
+                p.appendChild(origSpan);
+
+                p.appendChild(document.createTextNode('” 建议替换为规范表达 “'));
+                const impSpan = document.createElement('span');
+                impSpan.style.cssText = 'color:#389e0d; font-weight:600;';
+                impSpan.textContent = w.improved || '';
+                p.appendChild(impSpan);
+
+                p.appendChild(document.createTextNode(`” (${w.reason || '更符合政论语体'})`));
+                wordingList.appendChild(p);
+            });
+        }
+
+        // 升格示范范文
+        document.getElementById('upgradedText').textContent = report.upgradedAnswer || '（根据您的答题逻辑润色后的升格范文）';
+
+        // 展开报告
+        const repSec = document.getElementById('reportSection');
+        repSec.style.display = 'block';
+        repSec.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function openEssayHistory() {
+        const modal = document.getElementById('historyModal');
+        const body = document.getElementById('historyModalBody');
+        modal.style.display = 'flex';
+        body.textContent = '正在加载历史批改记录...';
+        try {
+            const res = await fetch('/api/essay/history');
+            const list = await res.json();
+            body.textContent = '';
+            if (!Array.isArray(list) || list.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'text-align:center; color:#999; padding:30px 0;';
+                empty.textContent = '暂无批改记录，完成作答并点击 AI 智能批改后将自动保存于此。';
+                body.appendChild(empty);
+                return;
+            }
+            list.forEach(rec => {
+                const card = document.createElement('div');
+                card.className = 'history-item';
+
+                const top = document.createElement('div');
+                top.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;';
+                const title = document.createElement('strong');
+                title.style.fontSize = '14px';
+                title.textContent = rec.questionTitle || '申论作答记录';
+                const score = document.createElement('span');
+                score.style.cssText = 'color:#389e0d; font-weight:600; font-size:13px; flex-shrink:0; margin-left:12px;';
+                score.textContent = `${rec.report && rec.report.totalScore !== undefined ? rec.report.totalScore : '-'} / ${rec.report && rec.report.maxScore ? rec.report.maxScore : 20} 分`;
+                top.appendChild(title);
+                top.appendChild(score);
+
+                const meta = document.createElement('div');
+                meta.style.cssText = 'font-size:12px; color:#888; margin-bottom:6px;';
+                const timeStr = rec.createdAt ? new Date(rec.createdAt).toLocaleString() : '';
+                meta.textContent = `${timeStr} · 引擎：${rec.model || '内置知识库'}${rec.fallback ? ' (降级)' : ''}`;
+
+                const snippet = document.createElement('div');
+                snippet.style.cssText = 'font-size:13px; color:#555; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+                snippet.textContent = rec.userAnswer || '';
+
+                card.appendChild(top);
+                card.appendChild(meta);
+                card.appendChild(snippet);
+
+                card.onclick = () => {
+                    if (rec.userAnswer) {
+                        editor.value = rec.userAnswer;
+                        updateWordCount();
+                    }
+                    if (rec.report) {
+                        renderReport(rec.report, {
+                            engine: rec.engine,
+                            modelUsed: rec.model,
+                            fallback: rec.fallback,
+                            fallbackReason: rec.fallbackReason
+                        });
+                    }
+                    closeEssayHistory();
+                };
+                body.appendChild(card);
+            });
+        } catch (e) {
+            body.textContent = '加载失败: ' + e.message;
+        }
+    }
+
+    function closeEssayHistory() {
+        document.getElementById('historyModal').style.display = 'none';
+    }
+</script>
+</body>
+</html>

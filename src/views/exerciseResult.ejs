@@ -553,8 +553,8 @@
     <p>
         做错<span class="wrong-count"><%= concernQuestions.filter(q => !q.correct).length %></span>题，
         做对但超时<span class="cost-count"><%= concernQuestions.filter(q => q.cost > costThreshold && q.correct).length %></span>题，
-        错误率<span class="wrong-count"><%= (concernQuestions.filter(q => !q.correct).length / concernQuestions.length * 100).toFixed(1) + '%' %></span>，
-        超时率<span class="cost-count"><%= (concernQuestions.filter(q => q.cost > costThreshold && q.correct).length / concernQuestions.length * 100).toFixed(1) + '%' %></span>
+        错误率<span class="wrong-count"><%= (concernQuestions.filter(q => !q.correct).length / (concernQuestions.length || 1) * 100).toFixed(1) + '%' %></span>，
+        超时率<span class="cost-count"><%= (concernQuestions.filter(q => q.cost > costThreshold && q.correct).length / (concernQuestions.length || 1) * 100).toFixed(1) + '%' %></span>
         <span class="comment">(耗时大于<%= costThreshold %>秒)</span>
     </p>
     <div id="costChart" style="margin: auto; width: auto;height:400px;"></div>
@@ -632,7 +632,7 @@
                         if (r > 40) return 3;
                         if (r > 20) return 4;
                         return 5;
-                    })(q.correctRatio)%>"> 正确率<%- q.correctRatio.toFixed(2)+ '%' %>
+                    })(q.correctRatio)%>"> 正确率<%- (typeof q.correctRatio === 'number' ? q.correctRatio.toFixed(2) : '--') + '%' %>
                     </span>
                     <span class="quz-tag"><%= q.totalCount %></span>
                 </span>
@@ -1028,7 +1028,7 @@
             type: 'value',
             name: '累计耗时',
             min: 0,
-            max: datas.length * <%= avg(costArr.map(i => i.cost+1)) %>,
+            max: (datas.length || 1) * <%= costArr.length > 0 ? avg(costArr.map(i => i.cost+1)) : 60 %>,
             axisLabel: {
                 formatter: '{value} s'
             },
@@ -1079,7 +1079,7 @@
                 // silent: true,
                 data: [{
                     name: '80分位数',
-                    yAxis: <%= percentile(80, costArr.map(i => i.cost)) %>
+                    yAxis: <%= costArr.length > 0 ? percentile(80, costArr.map(i => i.cost)) : 60 %>
                 }]
             }
         }, {
@@ -1122,7 +1122,7 @@
                 // silent: true,
                 data: [{
                     name: '平均难度',
-                    yAxis: <%= avg(costArr.map(i => i.correctRatio)) %>
+                    yAxis: <%= costArr.length > 0 ? avg(costArr.map(i => i.correctRatio)) : 50 %>
                 }]
             }
         }],

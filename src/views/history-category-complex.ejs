@@ -1,226 +1,306 @@
-<html lang="zh">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
+    <meta charset="utf-8">
+    <title>粉笔刷题辅助 - 分类看板</title>
     <style>
-        .block {
-            width: 330px;
-            /*float: left;*/
-            display: inline-grid;
-            line-height: 1.2em;
-            padding-left: 25px;
-            position: relative;
+        * {
             box-sizing: border-box;
-            /*box-shadow: 0 2px 9px #e6e6e6;*/
-            /*background-color: #f7f7f7;*/
-            transition: all .1s ease-in-out;
-
         }
-
-        .block a {
-            font-family: \\\\5FAE\\8F6F\\96C5\\9ED1, Ubuntu, Arial, Helvetica, sans-serif;
-            font-weight: 400
+        body {
+            background: #f5f7fa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
         }
-
-        .block h1 {
-            font-size: 1.4em;
-            margin-bottom: 5px
+        .nav-bar {
+            background: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .nav-btn {
+            text-decoration: none;
+            color: #555;
+            font-size: 14px;
+            border: 1px solid #d9d9d9;
+            padding: 6px 14px;
+            background-color: #fff;
+            border-radius: 4px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .nav-btn:hover {
+            color: #1890ff;
+            border-color: #1890ff;
+            background-color: #e6f7ff;
+        }
+        .nav-btn.active {
+            color: #fff;
+            background-color: #1890ff;
+            border-color: #1890ff;
+        }
+        .stat-card {
+            background: #fff;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-bottom: 20px;
+        }
+        .stat-title {
+            font-size: 15px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+        .stat-num {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0a5365;
+            margin-left: 8px;
+        }
+        .category-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        .block {
+            width: 340px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 16px;
+            transition: all 0.2s;
+        }
+        .block_tag {
+            font-size: 16px;
+            font-weight: 600;
+            color: #0a5365;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e8e8e8;
+            margin-bottom: 10px;
+        }
+        .cat-class {
+            padding-left: 4px;
+        }
+        .sub-block {
+            margin-top: 10px;
+            padding-left: 10px;
+            border-left: 2px solid #e8f4f8;
+        }
+        .sub-tag {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2b7a8c;
+            margin-bottom: 6px;
+        }
+        .sub-sub-tag {
+            font-size: 13px;
+            font-weight: 600;
+            color: #558b99;
+            margin-bottom: 4px;
+        }
         .his-item {
             display: flex;
-            color: #2d2d2ddb;
-            width: 300px;
-            margin-left: 25px;
-            margin-bottom: 1px;
-            margin-top: 1px;
-            line-height: 1.5rem;
-            -webkit-transition: all .3s;
-            -moz-transition: all .3s;
-            -o-transition: all .3s;
-            transition: all .3s;
-            font-family: "Sarasa Mono HC", "Droid Sans Mono", "monospace", ".SF NS Mono", serif;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            padding: 5px 8px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            background: #fafafa;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
         }
-
+        .his-item:hover {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
         .his-highlight {
-            background: #d8d8d885;
-            /* font-weight: bold; */
-            color: #339805;
+            background: #d8f5d0 !important;
+            color: #237804 !important;
+            font-weight: 600;
         }
-
         .his-title {
-            font-size: .875rem;
-            max-width: 230px;
+            max-width: 210px;
             overflow: hidden;
             white-space: nowrap;
             text-overflow: ellipsis;
         }
-
-        .his-title:hover {
-            cursor: pointer;
-            color: #217cc5;
-        }
-
         .his-time {
-            font-family: "Sarasa Mono HC", "Droid Sans Mono", "monospace", ".SF NS Mono", serif;
-            font-size: 12px;
-            position: absolute;
-            right: -6px;
+            color: #888;
+            font-size: 11px;
+            margin-left: 8px;
+            flex-shrink: 0;
         }
-
-        .block_tag {
-            padding: 8px;
-            padding-left: 0;
-            font-size: 1.5em;
-            font-weight: 400;
-            color: #0a5365;
-            /*border-bottom: 1px solid rgba(68, 68, 68, 0.25);*/
-        }
-
-        .switchAccount {
-            text-decoration: none;
-            color: #494a4a;
-            cursor: pointer;
-            font-size: 18px;
-            border: 1px solid #00000059;
-            padding: 2px;
-            background-color: #fff;
-            -webkit-transition: all .3s;
-            -moz-transition: all .3s;
-            -o-transition: all .3s;
-            transition: all .3s;
-        }
-        .switchAccount:hover {
-            background-color: #e5e5e5;
-        }
-
-        .cat-class {
-            border-left: 1px solid;
+        .empty-box {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         }
     </style>
     <script src="/d3.min.js"></script>
-<!--    <script type="text/javascript" src="//d3js.org/d3.v3.min.js"></script>-->
     <script type="text/javascript" src="//cdn.jsdelivr.net/cal-heatmap/3.3.10/cal-heatmap.min.js"></script>
     <link rel="stylesheet" href="//cdn.jsdelivr.net/cal-heatmap/3.3.10/cal-heatmap.css" />
 </head>
 
-<body style="background: #f5f7fa;">
-<div style="margin-left: 10px;">
-    <div style="margin-bottom: 10px;">
-        <a href="/setup" class="switchAccount">切换账号</a>
-        <a href="/history" class="switchAccount">列表视图</a>
-        <a href="/search" target="_blank" class="switchAccount">搜索习题</a>
+<body>
+<div class="nav-bar">
+    <div style="font-weight: 600; font-size: 17px; color: #1890ff;">粉笔刷题辅助工作台</div>
+    <div class="nav-links">
+        <a href="/history-category-complex" class="nav-btn active">分类看板</a>
+        <a href="/history" class="nav-btn">列表视图</a>
+        <a href="/practice/xingce" class="nav-btn">行测刷题</a>
+        <a href="/practice/essay" class="nav-btn">申论 AI 批改</a>
+        <a href="/search" target="_blank" class="nav-btn">搜索习题</a>
+        <a href="/calc" target="_blank" class="nav-btn">速算工具</a>
+        <a href="/setup" class="nav-btn">账号 / 模型配置</a>
     </div>
-    <div>
-        目前练习总题数<span style="margin-left:10px;font-size: 1.5em; color: #0a5365;"><%= groupItems.map(i => i.count).reduce((a,b) => a+b, 0) %></span>
-    </div>
-    <% if (exerciseHistory.length == 0) {%>
-        <script>window.location = '/setup' </script>
-    <% } %>
-    <div id="cal-heatmap" style="margin-left: 25px;"></div>
 </div>
 
-<div>
-    <% for (let c1 of groupItems) { %>
-        <% if (c1.count > 0) { %>
-            <div class="block" style="font-size:1em;margin:10px;margin-right: 70px">
-            <div class="block_tag"><%= c1.type + `(${c1.count})` %></div>
-                <div class="cat-class">
-                    <% for (let c1Items of c1.items) {%>
-                        <div class="his-item" id="his-<%= c1Items.id %>">
-                            <% let title = c1Items.cleanName + `(${c1Items.answerCount},${c1Items.correctRate}%) (${Math.round(moment.duration(c1Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
-                            <div title="<%= title %>" class="his-title" onclick="showReport(<%= c1Items.id %>)">
-                                <span><%= title %></span>
-                            </div>
-                            <div class="his-time"><%= c1Items.finishedDate %></div>
-                        </div>
-                    <% } %>
-                    <% for (let c2 of c1.childTypes) {%>
-                        <% if (c2.count > 0) { %>
-                            <div class="block" style="font-size:1em;">
-                                <div class="block_tag" style="font-size: 1.3em"><%= c2.type + `(${c2.count})` %></div>
-                                <div class="cat-class">
-                                    <% for (let c2Items of c2.items) {%>
-                                        <div class="his-item" id="his-<%= c2Items.id %>">
-                                            <% let title = c2Items.cleanName + `(${c2Items.answerCount},${c2Items.correctRate}%) (${Math.round(moment.duration(c2Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
-                                            <div title="<%= title %>" class="his-title" onclick="showReport(<%= c2Items.id %>)">
-                                                <span><%= title %></span>
-                                            </div>
-                                            <div class="his-time"><%= c2Items.finishedDate %></div>
-                                        </div>
-                                    <% } %>
-                                    <% for (let c3 of c2.childTypes) {%>
-                                        <% if (c3.count > 0) { %>
-                                            <div class="block" style="font-size:1em;">
-                                                <div class="block_tag" style="font-size: 1em"><%= c3.type + `(${c3.count})` %></div>
-                                                <div class="cat-class">
-                                                    <% for (let c2Items of c3.items) {%>
-                                                        <div class="his-item" id="his-<%= c2Items.id %>">
-                                                            <% let title = c2Items.cleanName + `(${c2Items.answerCount},${c2Items.correctRate}%) (${Math.round(moment.duration(c2Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
-                                                            <div title="<%= title %>" class="his-title" onclick="showReport(<%= c2Items.id %>)">
-                                                                <span><%= title %></span>
-                                                            </div>
-                                                            <div class="his-time"><%= c2Items.finishedDate %></div>
-                                                        </div>
-                                                    <% } %>
-                                                </div>
-                                            </div>
-                                        <% } %>
-                                    <% } %>
-                                </div>
+<div class="stat-card">
+    <div class="stat-title" style="display: flex; align-items: center; justify-content: space-between;">
+        <div>
+            目前练习总题数:
+            <span class="stat-num"><%= (groupItems || []).map(i => i.count || 0).reduce((a,b) => a+b, 0) %></span> 题
+        </div>
+        <a href="/history-category-complex?refresh=1" class="nav-btn" style="font-size: 12px; padding: 4px 10px;">强制刷新数据</a>
+    </div>
+    <div id="cal-heatmap" style="margin-top: 10px;"></div>
+</div>
 
+<% if (!exerciseHistory || exerciseHistory.length === 0) { %>
+    <div class="empty-box">
+        <h3>暂未获取到做题记录</h3>
+        <p style="margin-top: 8px;">可能原因：当前账号近期未在网页端做题，或者粉笔题库尚未同步。您可以去粉笔做几道题后再刷新。</p>
+        <p style="margin-top: 12px;"><a href="/setup" style="color: #1890ff;">重新配置 Cookie</a></p>
+    </div>
+<% } else { %>
+    <div class="category-container">
+        <% for (let c1 of (groupItems || [])) { %>
+            <% if (c1.count > 0) { %>
+                <div class="block">
+                    <div class="block_tag"><%= c1.type + ` (${c1.count}题)` %></div>
+                    <div class="cat-class">
+                        <% for (let c1Items of (c1.items || [])) { %>
+                            <div class="his-item" id="his-<%= c1Items.id %>" onclick="showReport(<%= c1Items.id %>)">
+                                <% let title = c1Items.cleanName + ` (${c1Items.answerCount}题, ${c1Items.correctRate}%) (${Math.round(moment.duration(c1Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
+                                <div title="<%= title %>" class="his-title">
+                                    <span><%= title %></span>
+                                </div>
+                                <div class="his-time"><%= c1Items.finishedDate %></div>
                             </div>
                         <% } %>
-                    <% } %>
+
+                        <% for (let c2 of (c1.childTypes || [])) { %>
+                            <% if (c2.count > 0) { %>
+                                <div class="sub-block">
+                                    <div class="sub-tag"><%= c2.type + ` (${c2.count})` %></div>
+                                    <div class="cat-class">
+                                        <% for (let c2Items of (c2.items || [])) { %>
+                                            <div class="his-item" id="his-<%= c2Items.id %>" onclick="showReport(<%= c2Items.id %>)">
+                                                <% let title = c2Items.cleanName + ` (${c2Items.answerCount}题, ${c2Items.correctRate}%) (${Math.round(moment.duration(c2Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
+                                                <div title="<%= title %>" class="his-title">
+                                                    <span><%= title %></span>
+                                                </div>
+                                                <div class="his-time"><%= c2Items.finishedDate %></div>
+                                            </div>
+                                        <% } %>
+
+                                        <% for (let c3 of (c2.childTypes || [])) { %>
+                                            <% if (c3.count > 0) { %>
+                                                <div class="sub-block" style="border-left-color: #e0f0ea;">
+                                                    <div class="sub-sub-tag"><%= c3.type + ` (${c3.count})` %></div>
+                                                    <div class="cat-class">
+                                                        <% for (let c3Items of (c3.items || [])) { %>
+                                                            <div class="his-item" id="his-<%= c3Items.id %>" onclick="showReport(<%= c3Items.id %>)">
+                                                                <% let title = c3Items.cleanName + ` (${c3Items.answerCount}题, ${c3Items.correctRate}%) (${Math.round(moment.duration(c3Items.elapsedTime, 'seconds').asMinutes().toFixed(1))}m)` %>
+                                                                <div title="<%= title %>" class="his-title">
+                                                                    <span><%= title %></span>
+                                                                </div>
+                                                                <div class="his-time"><%= c3Items.finishedDate %></div>
+                                                            </div>
+                                                        <% } %>
+                                                    </div>
+                                                </div>
+                                            <% } %>
+                                        <% } %>
+                                    </div>
+                                </div>
+                            <% } %>
+                        <% } %>
+                    </div>
                 </div>
-        </div>
+            <% } %>
         <% } %>
-    <% } %>
-</div>
-</body>
+    </div>
+<% } %>
+
 <script>
-    let cal = new CalHeatMap();
-    cal.init({
-        domain: 'month',
-        subDomain: "day",
-        domainGutter: 10,
-        tooltip: true,
-        range: 12,
-        start: new Date('<%= moment().startOf('month').startOf('day').subtract(1, 'year').add(1, 'month').format('YYYY-MM-DD')%>'),
-        data: getData(),
-        // subDomainTextFormat: function(date ,value) {
-        //     return getData()[date.getTime()/1000];
-        // },
-        // subDomainTextFormat: "%d",
-        domainLabelFormat: "%m月",
-        displayLegend: false,
-        cellSize: 15,
-        onClick: function(date, nb) {
-            let items = document.getElementsByClassName("his-item");
-            const datesAreOnSameDay = (first, second) =>
-                first.getFullYear() === second.getFullYear() &&
-                first.getMonth() === second.getMonth() &&
-                first.getDate() === second.getDate();
-            for (let item of items) {
-                let d = new Date(item.children[1].innerText);
-                if (datesAreOnSameDay(d, date)) {
-                    if (item.classList.contains("his-highlight")) {
-                        item.classList.remove("his-highlight");
+    try {
+        let cal = new CalHeatMap();
+        cal.init({
+            domain: 'month',
+            subDomain: "day",
+            domainGutter: 10,
+            tooltip: true,
+            range: 12,
+            start: new Date('<%= moment().startOf('month').startOf('day').subtract(1, 'year').add(1, 'month').format('YYYY-MM-DD')%>'),
+            data: getData(),
+            domainLabelFormat: "%m月",
+            displayLegend: false,
+            cellSize: 15,
+            onClick: function(date, nb) {
+                let items = document.getElementsByClassName("his-item");
+                const datesAreOnSameDay = (first, second) =>
+                    first.getFullYear() === second.getFullYear() &&
+                    first.getMonth() === second.getMonth() &&
+                    first.getDate() === second.getDate();
+                for (let item of items) {
+                    let timeEl = item.querySelector('.his-time');
+                    if (!timeEl) continue;
+                    let d = new Date(timeEl.innerText);
+                    if (datesAreOnSameDay(d, date)) {
+                        if (item.classList.contains("his-highlight")) {
+                            item.classList.remove("his-highlight");
+                        } else {
+                            item.classList.add("his-highlight");
+                        }
                     } else {
-                        item.classList.add("his-highlight");
+                        item.classList.remove("his-highlight");
                     }
-                } else {
-                    item.classList.remove("his-highlight");
                 }
-            }
-        },
-        legend: [15, 35, 70, 100]
-    });
+            },
+            legend: [15, 35, 70, 100]
+        });
+    } catch (e) {
+        console.error('HeatMap init failed:', e);
+    }
 
     function getData() {
-        return <%- JSON.stringify(exerciseHeatMapData) %>;
+        return <%- JSON.stringify(exerciseHeatMapData || {}) %>;
     }
 
     function showReport(exerciseId) {
         window.open('/exercise/' + exerciseId, "_blank");
     }
 </script>
+</body>
 </html>

@@ -1,13 +1,13 @@
-FROM hub.c.163.com/yddocker/youdata-runtime:node-12
-
-ENV npm_config_disturl=https://npm.taobao.org/mirrors/node
+FROM node:20-alpine
 
 WORKDIR /www
 
-COPY package.json /www
+COPY package.json package-lock.json* /www/
 
-RUN npm install --production --verbose
+RUN npm install --omit=dev
 
 COPY . /www
+
+EXPOSE 3000
 
 CMD ["node", "src/app.js"]
