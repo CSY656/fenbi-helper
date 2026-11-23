@@ -27,6 +27,7 @@ const exerciseResult = require('./service/exercisesResult');
 const loginService = require('./service/loginService');
 const practiceService = require('./service/practiceService');
 const aiScoreService = require('./service/aiScoreService');
+const xingceDoneService = require('./service/xingceDoneService');
 
 // 全局内存缓存的粉笔 Cookie，优先从持久化会话恢复，避免服务重启掉登录态
 const persistedSession = loginService.loadSession();
@@ -120,6 +121,7 @@ router.get('/setup', async ctx => {
 router.post('/api/import-cookie', async ctx => {
     let { cookie } = ctx.request.body || {};
     if (!cookie || typeof cookie !== 'string' || cookie.trim().length === 0) {
+        ctx.status = 400;
         ctx.body = { code: 400, message: '请粘贴粉笔 Cookie 字符串' };
         return;
     }
@@ -127,6 +129,7 @@ router.post('/api/import-cookie', async ctx => {
     let trimmedCookie = cookie.trim();
     let checkResult = await loginService.validateCookie(trimmedCookie);
     if (!checkResult.valid) {
+        ctx.status = 401;
         ctx.body = {
             code: 401,
             message: checkResult.message || '该 Cookie 无法访问粉笔题库，请确认是在登录粉笔网后复制的完整 Cookie'
@@ -225,14 +228,16 @@ router.post('/api/login', async ctx => {
                 redirectPath
             };
         } else {
+            ctx.status = 401;
             ctx.body = {
-                code: 500,
+                code: 401,
                 message: '账号或密码错误，推荐使用上方【粉笔 Cookie 凭据】直接导入'
             };
         }
     } catch (err) {
+        ctx.status = 502;
         ctx.body = {
-            code: 500,
+            code: 502,
             message: '登录请求失败: ' + (err.message || '未知错误')
         };
     }
@@ -249,11 +254,12 @@ router.get('/practice/xingce', async ctx => {
     let moduleName = currentMod ? currentMod.name : '';
     let batch = Math.max(0, Number.parseInt(ctx.query.batch || '0', 10) || 0);
     let result = await practiceService.getXingceQuestionsWithMeta({ moduleId, moduleName, batch }, cookie);
+    let questions = xingceDoneService.filterUndone(result.questions);
     await ctx.render('practice-xingce', {
         modules,
         currentModuleId: moduleId,
         currentBatch: batch,
-        questions: result.questions,
+        questions,
         sourceMode: result.sourceMode,
         sourceMessage: result.sourceMessage
     });
@@ -263,7 +269,10 @@ router.get('/practice/xingce', async ctx => {
 router.get('/practice/essay', async ctx => {
     let type = ctx.query.type || 'all';
     let qid = ctx.query.qid;
-    let questionList = practiceService.getEssayQuestions(type);
+    const paperId = ctx.query.paperId || '';
+    const cookie = getEffectiveCookie(ctx);
+    const result = await practiceService.getEssayQuestionsWithMeta(type, cookie, { paperId });
+    let questionList = result.questions;
     let currentQuestion = qid
         ? practiceService.getEssayQuestionById(qid)
         : (questionList[0] || practiceService.getEssayQuestions('all')[0]);
@@ -271,8 +280,45 @@ router.get('/practice/essay', async ctx => {
     await ctx.render('practice-essay', {
         currentType: type,
         questionList,
-        currentQuestion
+        currentQuestion,
+        sourceMode: result.sourceMode,
+        sourceMessage: result.sourceMessage,
+        activePaperId: result.activePaperId
     });
+});
+
+// 申论在线套卷：考区标签分组（国考/各省/专项）
+router.get('/api/essay/paper-labels', async ctx => {
+    const cookie = getEffectiveCookie(ctx);
+    if (!cookie) {
+        ctx.body = { code: 200, labels: [], message: '未配置粉笔 Cookie，无法获取在线套卷目录' };
+        return;
+    }
+    try {
+        const labels = await practiceService.fetchShenlunLabels(cookie);
+        ctx.body = { code: 200, labels };
+    } catch (e) {
+        ctx.status = 502;
+        ctx.body = { code: 502, message: `获取考区标签失败：${e.message || e}` };
+    }
+});
+
+// 申论在线套卷：某考区下的卷列表
+router.get('/api/essay/label-papers', async ctx => {
+    const cookie = getEffectiveCookie(ctx);
+    const labelId = ctx.query.labelId;
+    if (!cookie || !labelId) {
+        ctx.status = 400;
+        ctx.body = { code: 400, message: '缺少 labelId 或未配置粉笔 Cookie' };
+        return;
+    }
+    try {
+        const papers = await practiceService.fetchShenlunLabelPapers(labelId, cookie);
+        ctx.body = { code: 200, papers };
+    } catch (e) {
+        ctx.status = 502;
+        ctx.body = { code: 502, message: `获取套卷列表失败：${e.message || e}` };
+    }
 });
 
 // ======================== 新增：大模型与 AI 批改 API ========================
@@ -303,7 +349,9 @@ router.post('/api/essay/grade', async ctx => {
         let result = await aiScoreService.gradeEssay(params);
         ctx.body = { code: 200, ...result };
     } catch (e) {
-        ctx.body = { code: 500, message: e.message || '批改失败' };
+        const isEmptyAnswer = e.message === '作答内容为空，请先在答题纸中作答';
+        ctx.status = isEmptyAnswer ? 400 : 500;
+        ctx.body = { code: ctx.status, message: e.message || '批改失败' };
     }
 });
 
@@ -418,6 +466,13 @@ router.del('/api/collect/:questionId', requireCookieApi, async ctx => {
     let questionId = ctx.params.questionId;
     let cookie = ctx.state.effectiveCookie;
     await exerciseResult.delCollect(questionId, cookie);
+    ctx.body = { success: true };
+});
+
+// 记录已做过的行测题（本地记录，用于题库去重；历史详情仍走粉笔分类看板）
+router.post('/api/xingce/done', async ctx => {
+    let ids = (ctx.request.body && ctx.request.body.ids) || [];
+    xingceDoneService.addDoneIds(ids);
     ctx.body = { success: true };
 });
 
