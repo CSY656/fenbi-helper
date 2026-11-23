@@ -195,6 +195,10 @@
         .option-item {
             display: flex;
             align-items: center;
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+            color: inherit;
             padding: 12px 18px;
             border: 1px solid #e8e8e8;
             border-radius: 8px;
@@ -251,6 +255,32 @@
             background: #ff4d4f !important;
             color: #fff !important;
             border-color: #ff4d4f !important;
+        }
+
+        /* 即做即判结果 */
+        .answer-feedback {
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin: -8px 0 18px;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.6;
+            display: none;
+        }
+        .answer-feedback.correct {
+            color: #237804;
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+        }
+        .answer-feedback.wrong {
+            color: #cf1322;
+            background: #fff1f0;
+            border: 1px solid #ffa39e;
+        }
+        .answer-feedback.unavailable {
+            color: #ad6800;
+            background: #fffbe6;
+            border: 1px solid #ffe58f;
         }
 
         /* 答案解析抽屉 */
@@ -341,6 +371,9 @@
             height: 38px;
             border: 1px solid #d9d9d9;
             border-radius: 6px;
+            background: #fff;
+            font-family: inherit;
+            color: inherit;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -499,6 +532,9 @@
             <!-- 选项 -->
             <div class="options-list" id="optionsList"></div>
 
+            <!-- 即做即判结果 -->
+            <div class="answer-feedback" id="answerFeedback" role="status" aria-live="polite"></div>
+
             <!-- 答案解析 -->
             <div class="solution-box" id="solutionBox">
                 <div class="solution-header">
@@ -518,7 +554,8 @@
             </div>
             <div>
                 <button class="btn-action" id="toggleSolBtn" onclick="toggleSolution()" style="display: none;">查看解析</button>
-                <button class="btn-action btn-primary" id="submitExamBtn" onclick="finishExam()" style="display: none; margin-left: 8px;">交卷查看报告</button>
+                <button class="btn-action" id="submitExamBtn" onclick="finishExam()" style="display: none; margin-left: 8px;">交卷查看报告</button>
+                <button class="btn-action" id="nextSetBtn" onclick="restartPractice()" style="margin-left: 8px;">换一组题</button>
             </div>
         </div>
     </div>
@@ -606,11 +643,25 @@
 
     function init() {
         renderCardGrid();
+        if (questions.length === 0) {
+            const selectedOpt = document.getElementById('moduleSelect').selectedOptions[0];
+            document.getElementById('qModuleTag').innerText = (selectedOpt && selectedOpt.text) || '行测真题';
+            document.getElementById('qIndexText').innerText = '共 0 题';
+            document.getElementById('qSourceText').innerText = '';
+            document.getElementById('qContent').innerText = '当前分类暂无可用题目，请切换其他分类。';
+            document.querySelector('.bottom-bar').style.display = 'none';
+            return;
+        }
         renderQuestion(currentIndex);
         startTimer();
     }
 
-    function setMode(newMode) {
+    function setMode(newMode) {        if (newMode === 'exam' && mode !== 'exam') {
+            userAnswers = {};
+            isExamFinished = false;
+            secondsElapsed = 0;
+            document.getElementById('timerBadge').innerText = '00:00';
+        }
         mode = newMode;
         document.getElementById('modePracticeBtn').classList.toggle('active', mode === 'practice');
         document.getElementById('modeExamBtn').classList.toggle('active', mode === 'exam');
@@ -624,7 +675,8 @@
         let grid = document.getElementById('cardGrid');
         grid.innerHTML = '';
         questions.forEach((q, idx) => {
-            let el = document.createElement('div');
+            let el = document.createElement('button');
+            el.type = 'button';
             el.className = 'card-num';
             el.innerText = idx + 1;
             if (idx === currentIndex) el.classList.add('current');
@@ -674,7 +726,8 @@
         const correctChoice = getCorrectChoice(q);
 
         options.forEach((optText, optIdx) => {
-            const item = document.createElement('div');
+            const item = document.createElement('button');
+            item.type = 'button';
             item.className = 'option-item';
             
             const selected = userAnswers[currentIndex] === optIdx;
@@ -702,17 +755,33 @@
             optList.appendChild(item);
         });
 
-        // 解析控制
+        // 作答结果与解析控制
+        const feedback = document.getElementById('answerFeedback');
         const solBox = document.getElementById('solutionBox');
         const toggleBtn = document.getElementById('toggleSolBtn');
-        if (mode === 'practice' && userAnswers[currentIndex] !== undefined) {
+        const shouldShowAnswer = (mode === 'practice' && userAnswers[currentIndex] !== undefined) || isExamFinished;
+        feedback.style.display = 'none';
+        feedback.className = 'answer-feedback';
+        feedback.innerText = '';
+
+        if (shouldShowAnswer && userAnswers[currentIndex] !== undefined) {
+            const userLetter = letters[userAnswers[currentIndex]] || String(userAnswers[currentIndex] + 1);
+            feedback.style.display = 'block';
+            if (correctChoice < 0) {
+                feedback.classList.add('unavailable');
+                feedback.innerText = `已选择 ${userLetter}，但本题缺少有效答案，暂时无法自动判题。`;
+            } else {
+                const isCorrect = userAnswers[currentIndex] === correctChoice;
+                feedback.classList.add(isCorrect ? 'correct' : 'wrong');
+                feedback.innerText = isCorrect
+                    ? `✓ 回答正确！你的答案：${userLetter}`
+                    : `✗ 回答错误。你的答案：${userLetter}；正确答案：${letters[correctChoice]}`;
+            }
+        }
+
+        if (shouldShowAnswer) {
             document.getElementById('solContent').innerHTML = sanitizeHtml(q.solution || '<p>暂无解析</p>');
             document.getElementById('solDiffText').innerText = `难度：${'★'.repeat(q.difficulty || 3)}`;
-            solBox.style.display = 'block';
-            toggleBtn.style.display = 'none';
-        } else if (isExamFinished) {
-            document.getElementById('solContent').innerHTML = sanitizeHtml(q.solution || '<p>暂无解析</p>');
-            document.getElementById('solDiffText').innerText = correctChoice >= 0 ? `正确答案：${letters[correctChoice]}` : '';
             solBox.style.display = 'block';
             toggleBtn.style.display = 'none';
         } else {
@@ -723,9 +792,34 @@
         renderCardGrid();
     }
 
+    // 已做题记录：作答即标记，批量异步上报，用于下次取题时去重
+    let pendingDoneIds = new Set();
+    let doneFlushTimer = null;
+
+    function markDone(q) {
+        if (q && q.id !== undefined && q.id !== null) pendingDoneIds.add(String(q.id));
+        if (doneFlushTimer) return;
+        doneFlushTimer = setTimeout(flushDone, 600);
+    }
+
+    async function flushDone() {
+        if (doneFlushTimer) { clearTimeout(doneFlushTimer); doneFlushTimer = null; }
+        if (pendingDoneIds.size === 0) return;
+        const ids = [...pendingDoneIds];
+        pendingDoneIds.clear();
+        try {
+            await fetch('/api/xingce/done', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            });
+        } catch (e) { /* 记录失败不影响答题 */ }
+    }
+
     function selectOption(choiceIdx) {
         if (isExamFinished) return; // 交卷后锁死不可改
         userAnswers[currentIndex] = choiceIdx;
+        markDone(questions[currentIndex]);
         renderQuestion(currentIndex);
     }
 
@@ -749,6 +843,7 @@
         }
         clearInterval(timer);
         isExamFinished = true;
+        flushDone();
 
         let correctCount = 0;
         questions.forEach((q, idx) => {
@@ -769,7 +864,9 @@
         document.getElementById('resultModal').style.display = 'none';
     }
 
-    function restartPractice() {
+    async function restartPractice() {
+        // 换题前先落库已作答题号（作答时已 markDone），避免跳转取消异步请求
+        await flushDone();
         let modId = document.getElementById('moduleSelect').value;
         window.location.href = `/practice/xingce?moduleId=${encodeURIComponent(modId)}&batch=${currentBatch + 1}`;
     }

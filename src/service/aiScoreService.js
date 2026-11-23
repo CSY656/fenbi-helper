@@ -186,7 +186,7 @@ async function testConnection(customConfig = {}) {
                 messages: [
                     { role: 'user', content: 'Ping! 请回复一条极短问候。' }
                 ],
-                max_tokens: 20
+                max_tokens: 1000
             }),
             signal: AbortSignal.timeout(15000)
         });
@@ -258,6 +258,16 @@ function validateEssayReport(report, maxScore = 20) {
         ? report.scoreBreakdown
         : {};
 
+    // kaogong 批改协议：保留证据链字段（材料证据/考生表达/实际得分），缺失时补空不报错
+    const checklist = Array.isArray(report.keypointsChecklist)
+        ? report.keypointsChecklist.map(item => (item && typeof item === 'object' ? {
+            ...item,
+            materialEvidence: typeof item.materialEvidence === 'string' ? item.materialEvidence : '',
+            userExpression: typeof item.userExpression === 'string' ? item.userExpression : '',
+            earned: Number.isFinite(Number(item.earned)) ? Number(item.earned) : (item.hit ? Number(item.weight) || 0 : 0)
+        } : item))
+        : [];
+
     return {
         totalScore: boundedScore,
         maxScore: Number(report.maxScore) || maxScore,
@@ -273,7 +283,7 @@ function validateEssayReport(report, maxScore = 20) {
         wordCountAnalysis: report.wordCountAnalysis && typeof report.wordCountAnalysis === 'object'
             ? report.wordCountAnalysis
             : { actualCount: 0, limitRequirement: '', isOverLimit: false, comment: '字数分析未提供' },
-        keypointsChecklist: Array.isArray(report.keypointsChecklist) ? report.keypointsChecklist : [],
+        keypointsChecklist: checklist,
         structureDiagnosis: typeof report.structureDiagnosis === 'string' ? report.structureDiagnosis : '',
         languageAndWording: Array.isArray(report.languageAndWording) ? report.languageAndWording : [],
         summaryComment: typeof report.summaryComment === 'string' ? report.summaryComment : '',
@@ -296,35 +306,36 @@ function gradeWithKnowledgeBase(params) {
     const answerClean = userAnswer.replace(/[\r\n\s]/g, '');
     const userWordsCount = answerClean.length;
 
+    // kaogong 批改协议：缺材料时不猜材料得分点，只反馈结构与语言
+    const hasMaterials = (Array.isArray(params.materials) && params.materials.join('').trim())
+        || (typeof params.materials === 'string' && params.materials.trim());
+
     let totalScore = 0;
     const checklist = [];
 
     // 采分点匹配诊断
-    const points = Array.isArray(scoringPoints) && scoringPoints.length > 0
-        ? scoringPoints
-        : [
-            '核心概念界定与主题鲜明度（4分）',
-            '逻辑层次分明，分类归纳有条理（4分）',
-            '要点全面，准确提炼关键事实（4分）',
-            '具体举措务实可行，针对性强（4分）',
-            '语言精炼，符合政论规范（4分）'
-        ];
+    const points = !hasMaterials
+        ? []
+        : Array.isArray(scoringPoints) && scoringPoints.length > 0
+            ? scoringPoints
+            : [
+                '核心概念界定与主题鲜明度（4分）',
+                '逻辑层次分明，分类归纳有条理（4分）',
+                '要点全面，准确提炼关键事实（4分）',
+                '具体举措务实可行，针对性强（4分）',
+                '语言精炼，符合政论规范（4分）'
+            ];
 
-    const keypointsBudget = Number((maxScore * 0.8).toFixed(1));
-    const pointWeight = keypointsBudget / points.length;
+    const keypointsBudget = points.length > 0 ? Number((maxScore * 0.8).toFixed(1)) : 0;
+    const pointWeight = points.length > 0 ? keypointsBudget / points.length : 0;
+    const normalizedAnswer = userAnswer.replace(/[\s“”‘’'"「」『』]/g, '');
 
     points.forEach((rawPoint) => {
         const purePoint = rawPoint.replace(/（\d+分）/, '').replace(/^\d+[\.、]/, '').trim();
         const keywords = purePoint.split(/[/、，,\s]+/).filter(w => w.length >= 2);
 
-        let hitCount = 0;
-        keywords.forEach(kw => {
-            if (userAnswer.includes(kw)) {
-                hitCount++;
-            }
-        });
-
-        const isHit = keywords.length > 0 ? (hitCount / keywords.length >= 0.4 || hitCount >= 2) : false;
+        const matchedKeyword = keywords.find(kw => normalizedAnswer.includes(kw.replace(/[\s“”‘’'"「」『』]/g, '')));
+        const isHit = Boolean(matchedKeyword);
         const scoreEarned = isHit ? pointWeight : 0;
         totalScore += scoreEarned;
 
@@ -332,9 +343,12 @@ function gradeWithKnowledgeBase(params) {
             point: rawPoint,
             weight: Number(pointWeight.toFixed(1)),
             hit: isHit,
+            materialEvidence: '本题预设训练要点（内置规则引擎按关键词匹配，未逐句核对材料原文）',
+            userExpression: isHit ? `命中相关表述：“${matchedKeyword}”` : '',
+            earned: Number(scoreEarned.toFixed(1)),
             analysis: isHit
-                ? '考生作答中较好地体现了关键要点（包含相关表述），得分有效。'
-                : '材料核心要点未在答卷中明显呈现，建议针对此类关键词强化信息提取。'
+                ? '考生作答中包含与该要点相关的表述，按训练量表计分。'
+                : '该要点未在答卷中明显呈现，建议回到材料定位对应信息后补写。'
         });
     });
 
@@ -343,6 +357,7 @@ function gradeWithKnowledgeBase(params) {
     let structureScore = Number((maxScore * 0.15).toFixed(1));
     let structureDiagnosis = '作答采用了分条列项的书写规范，条理较清晰。';
     if (userAnswer.includes('一、') || userAnswer.includes('1.') || userAnswer.includes('【')) {
+        structureScore = structureMax;
         structureDiagnosis = '采用了规范的分条序号或小标题前置形式，层次条理严明，结构得分良好。';
     } else {
         structureDiagnosis = '作答未显著使用“一、二、三”分条序数或小标题归并，阅卷人视线容易疲劳，建议强化同类要点小标题归并。';
@@ -369,13 +384,27 @@ function gradeWithKnowledgeBase(params) {
     });
 
     const keypointsEarned = Number(totalScore.toFixed(1));
-    const finalScore = Math.min(maxScore, Math.max(2, Math.round(keypointsEarned + structureScore)));
+    // 大作文评分点是维度制而非关键词清单，关键词匹配会严重失真，按协议不给估分只给质性反馈
+    const isEssay = params.questionType === 'essay';
+    const finalScore = points.length === 0 || isEssay
+        ? null
+        : Math.min(maxScore, Math.max(0, Math.round(keypointsEarned + structureScore)));
+    const ratio = finalScore === null ? null : finalScore / maxScore;
     let rating = '二类文上';
-    const ratio = finalScore / maxScore;
-    if (ratio >= 0.85) rating = '一类文 (优秀)';
+    if (ratio === null) rating = points.length === 0 ? '未评分（缺材料）' : '未评分（大作文需语义批改）';
+    else if (ratio >= 0.85) rating = '一类文 (优秀)';
     else if (ratio >= 0.70) rating = '二类文上 (良好)';
     else if (ratio >= 0.55) rating = '二类文下 (中等)';
     else rating = '三类文 (需加强)';
+
+    const firstMiss = checklist.find(item => !item.hit);
+    const priorityTask = points.length === 0
+        ? '请补充本题的给定材料后重新批改，以获得材料要点比对与训练评分。'
+        : isEssay
+            ? '请在【账号 / 模型配置】接入大模型后重新批改，以获得立意、论证与语言的语义级诊断和升格范文。'
+            : firstMiss
+                ? `优先修改任务：回到材料定位“${firstMiss.point}”对应的信息，重写或补写该要点后再对照批改。`
+                : '优先修改任务：要点已全部命中，请压缩修饰性表述、将小标题提炼得更精准后重写一遍，对照语言升格建议。';
 
     return {
         totalScore: finalScore,
@@ -383,8 +412,8 @@ function gradeWithKnowledgeBase(params) {
         rating,
         isEngine: 'knowledge_base',
         scoreBreakdown: {
-            keypointsScore: Math.max(0, Number((finalScore - structureScore).toFixed(1))),
-            keypointsMax: Math.round(maxScore * 0.8),
+            keypointsScore: finalScore !== null ? Math.max(0, Number((finalScore - structureScore).toFixed(1))) : 0,
+            keypointsMax: finalScore !== null ? Math.round(maxScore * 0.8) : 0,
             structureScore: structureScore,
             structureMax: Math.round(structureMax),
             languageScore: 0,
@@ -394,14 +423,16 @@ function gradeWithKnowledgeBase(params) {
             actualCount: userWordsCount,
             limitRequirement: questionRequirement,
             isOverLimit: false,
-            comment: `实际有效字数 ${userWordsCount} 字，整体篇幅把控符合答题规范。`
+            comment: `实际有效字数 ${userWordsCount} 字（系统按纯文本统计，不含空格换行）。`
         },
-        keypointsChecklist: checklist,
+        keypointsChecklist: isEssay ? [] : checklist,
         structureDiagnosis,
-        languageAndWording: languageAndWording.length > 0 ? languageAndWording : [
-            { original: '相关方面', improved: '多方协同联动', reason: '增强动词表现力' }
-        ],
-        summaryComment: `本题考查核心采分点命中率。作答总体条理清晰，综合得分率约为 ${Math.round(ratio * 100)}%。建议继续强化“关键词前置+浓缩要点”习惯，杜绝修饰性冗余词。`,
+        languageAndWording,
+        summaryComment: ratio === null
+            ? (points.length === 0
+                ? `本题未提供给定材料，按批改协议不猜测材料得分点，本次仅反馈结构与语言问题，不给出总分。${priorityTask}`
+                : `大作文按立意、论证、结构、语言等维度综合评定，内置关键词引擎无法胜任语义级阅卷，按批改协议不给出失真的估分，仅反馈结构与语言问题。${priorityTask}`)
+            : `本题考查核心采分点命中率。作答总体条理清晰，综合得分率约为 ${Math.round(ratio * 100)}%。本得分为内置规则引擎的训练估分（关键词匹配，非语义级阅卷），非官方评分。${priorityTask}`,
         upgradedAnswer: standardAnswer || '（参考公考官方标准答案进行对照订正）'
     };
 }
@@ -442,9 +473,10 @@ async function gradeEssay(params) {
                         { role: 'user', content: userPrompt }
                     ],
                     temperature: typeof config.temperature === 'number' ? config.temperature : 0.2,
-                    max_tokens: 3000
+                    // 推理模型的 reasoning_content 与正文共用 token 配额；40分大作文实测思考约1.2万token，需再预留正文空间。
+                    max_tokens: 24000
                 }),
-                signal: AbortSignal.timeout(90000)
+                signal: AbortSignal.timeout(150000)
             });
 
             if (!res.ok) {
@@ -453,9 +485,13 @@ async function gradeEssay(params) {
             }
 
             const json = await res.json();
-            const content = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+            const choice = json.choices && json.choices[0];
+            const content = choice && choice.message && choice.message.content;
             if (!content) {
-                throw new Error('模型响应中缺少 choices[0].message.content');
+                const reason = choice && choice.finish_reason === 'length'
+                    ? '模型 token 配额已耗尽，未生成正文'
+                    : '模型响应中缺少 choices[0].message.content';
+                throw new Error(reason);
             }
 
             const parsed = extractAndParseJSON(content);

@@ -340,7 +340,7 @@ async function getXingceCategories(cookie) {
 const MODULE_SEARCH_KEYWORDS = [
     { match: '言语', moduleId: 1, queries: ['这段文字意在说明', '填入划横线部分最恰当', '这段话主要讲述', '最恰当的一项'] },
     { match: '常识', moduleId: 5, queries: ['下列说法正确的是', '下列说法错误的是', '关于我国', '宪法规定'] },
-    { match: '判断', moduleId: 2, queries: ['由此可以推出', '最能削弱上述', '最能支持上述', '根据上述定义'] },
+    { match: '判断推理', moduleId: 2, queries: ['由此可以推出', '最能削弱上述', '最能支持上述', '根据上述定义'] },
     { match: '数量', moduleId: 3, queries: ['至少需要', '多少元', '多少小时', '概率为'] },
     { match: '资料', moduleId: 4, queries: ['同比增长', '占全国', '百分点', '平均每'] }
 ];
@@ -353,6 +353,8 @@ function inferModuleMeta(moduleId, moduleName) {
                 return item;
             }
         }
+        // 政治理论等新分类不能默认当成言语理解
+        return { match: nameStr, moduleId, queries: [] };
     }
     for (const item of MODULE_SEARCH_KEYWORDS) {
         if (String(moduleId) === String(item.moduleId)) {
@@ -362,18 +364,21 @@ function inferModuleMeta(moduleId, moduleName) {
     return MODULE_SEARCH_KEYWORDS[0];
 }
 
+function normalizeCorrectAnswer(q, optionCount) {
+    const answer = (q && q.correctAnswer) || {};
+    const rawChoice = Array.isArray(answer.choices) ? answer.choices[0] : answer.choice;
+    const choice = rawChoice !== '' && rawChoice !== null && rawChoice !== undefined
+        ? Number(rawChoice)
+        : -1;
+    return {
+        choice: Number.isInteger(choice) && choice >= 0 && choice < optionCount ? choice : -1
+    };
+}
+
 function normalizeOnlineQuestion(q, idx, moduleId, moduleName) {
     if (!q || !q.id) return null;
     const options = q.accessories && q.accessories[0] && q.accessories[0].options;
     if (!Array.isArray(options) || options.length === 0) return null;
-
-    const ca = q.correctAnswer || {};
-    let normalizedChoice = -1;
-    if (typeof ca.choice === 'number') {
-        normalizedChoice = ca.choice;
-    } else if (Array.isArray(ca.choices) && ca.choices.length > 0) {
-        normalizedChoice = Number(ca.choices[0]);
-    }
 
     return {
         id: q.id,
@@ -384,7 +389,7 @@ function normalizeOnlineQuestion(q, idx, moduleId, moduleName) {
         content: q.content || '',
         material: q.material ? (q.material.content || q.material) : null,
         accessories: q.accessories || [],
-        correctAnswer: { choice: normalizedChoice },
+        correctAnswer: normalizeCorrectAnswer(q, options.length),
         difficulty: q.difficulty || 3,
         solution: q.solution || '<p>暂无解析</p>',
         keypoints: (q.keypoints || []).map(k => (typeof k === 'string' ? { name: k } : k)),
@@ -410,23 +415,15 @@ async function fetchSolutionsByIds(qids, cookie, moduleId, moduleName) {
 }
 
 async function fetchFromUserExercises(catId, moduleName, batchNum, cookie, count) {
-    const candidateCatIds = _.uniq([String(catId || '1'), '1', '3']);
-    const listResults = await Promise.all(
-        candidateCatIds.map(cid =>
-            httpRequest({
-                url: `https://tiku.fenbi.com/api/xingce/category-exercises?categoryId=${encodeURIComponent(cid)}&cursor=0&count=${count}`,
-                method: 'GET',
-                json: true,
-                headers: { ...headers, cookie },
-                timeout: 5000
-            }).catch(() => null)
-        )
-    );
+    const listResult = await httpRequest({
+        url: `https://tiku.fenbi.com/api/xingce/category-exercises?categoryId=${encodeURIComponent(catId || '1')}&cursor=0&count=${count}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 5000
+    }).catch(() => null);
 
-    const allExercises = _.uniqBy(
-        _.flatMap(listResults, r => (r && Array.isArray(r.datas) ? r.datas : [])),
-        'id'
-    );
+    const allExercises = listResult && Array.isArray(listResult.datas) ? listResult.datas : [];
     if (allExercises.length === 0) return null;
 
     const meta = inferModuleMeta(catId, moduleName);
@@ -476,8 +473,37 @@ async function fetchFromUserExercises(catId, moduleName, batchNum, cookie, count
     };
 }
 
+async function fetchFromNewExercise(catId, moduleName, cookie, count) {
+    const limit = Math.min(50, Math.max(1, Number.parseInt(count, 10) || 15));
+    const body = `type=3&keypointId=${encodeURIComponent(catId)}&limit=${limit}&exerciseTimeMode=2`;
+    const created = await httpRequest({
+        url: 'https://tiku.fenbi.com/api/xingce/exercises',
+        method: 'POST',
+        body,
+        json: true,
+        headers: {
+            ...headers,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            cookie
+        },
+        timeout: 10000
+    });
+    const qids = created && created.sheet && Array.isArray(created.sheet.questionIds)
+        ? created.sheet.questionIds.filter(Boolean)
+        : [];
+    if (qids.length === 0) return null;
+
+    const questions = await fetchSolutionsByIds(qids, cookie, catId, moduleName);
+    if (questions.length === 0) return null;
+    return {
+        questions,
+        sheetName: (created.sheet && created.sheet.name) || `专项智能练习（${moduleName}）`
+    };
+}
+
 async function fetchFromOnlineSearch(catId, moduleName, batchNum, cookie) {
     const meta = inferModuleMeta(catId, moduleName);
+    if (meta.queries.length === 0) return null;
     const query = meta.queries[batchNum % meta.queries.length];
     const start = Math.floor(batchNum / meta.queries.length) * 15;
 
@@ -519,19 +545,29 @@ async function getXingceQuestionsWithMeta(params = {}, cookie) {
         let lastErr = '';
         try {
             const catId = moduleId || 1;
-            // 1. 优先从用户对应模块的历史练习中抽题
-            const fromExercises = await fetchFromUserExercises(catId, moduleName, batchNum, cookie, count);
-            if (fromExercises && fromExercises.questions.length > 0) {
-                questions = fromExercises.questions;
-                sourceMode = 'online';
-                sourceMessage = `已连接粉笔在线题库（来源练习：${fromExercises.sheetName}，共 ${questions.length} 题）。`;
-            } else {
-                // 2. 该模块暂无历史练习时，通过粉笔在线题库检索该模块真题
-                const fromSearch = await fetchFromOnlineSearch(catId, moduleName, batchNum, cookie);
-                if (fromSearch && fromSearch.questions.length > 0) {
-                    questions = fromSearch.questions;
+            if (batchNum > 0) {
+                // “再做一组”按当前知识点重新组卷，不能循环有限的历史练习。
+                const fromNewExercise = await fetchFromNewExercise(catId, moduleName, cookie, count);
+                if (fromNewExercise && fromNewExercise.questions.length > 0) {
+                    questions = fromNewExercise.questions;
                     sourceMode = 'online';
-                    sourceMessage = `已连接粉笔在线题库（按「${moduleName || inferModuleMeta(catId, moduleName).match}」真题检索组卷，共 ${questions.length} 题）。`;
+                    sourceMessage = `已为「${moduleName}」生成第 ${batchNum + 1} 组专项练习（${fromNewExercise.sheetName}，共 ${questions.length} 题）。`;
+                }
+            } else {
+                // 首次进入时优先展示当前科目的最近一套历史练习。
+                const fromExercises = await fetchFromUserExercises(catId, moduleName, batchNum, cookie, count);
+                if (fromExercises && fromExercises.questions.length > 0) {
+                    questions = fromExercises.questions;
+                    sourceMode = 'online';
+                    sourceMessage = `已连接粉笔在线题库（来源练习：${fromExercises.sheetName}，共 ${questions.length} 题）。`;
+                } else {
+                    // 无历史练习时通过粉笔在线题库检索该模块真题。
+                    const fromSearch = await fetchFromOnlineSearch(catId, moduleName, batchNum, cookie);
+                    if (fromSearch && fromSearch.questions.length > 0) {
+                        questions = fromSearch.questions;
+                        sourceMode = 'online';
+                        sourceMessage = `已连接粉笔在线题库（按「${moduleName || inferModuleMeta(catId, moduleName).match}」真题检索组卷，共 ${questions.length} 题）。`;
+                    }
                 }
             }
         } catch (e) {
@@ -551,8 +587,12 @@ async function getXingceQuestionsWithMeta(params = {}, cookie) {
     if (questions.length === 0) {
         const meta = inferModuleMeta(moduleId, moduleName);
         let filtered = XINGCE_QUESTIONS.filter(q => String(q.moduleId) === String(meta.moduleId));
-        let pool = filtered.length > 0 ? filtered : XINGCE_QUESTIONS;
-        let cloned = _.cloneDeep(pool);
+        if (filtered.length === 0) {
+            sourceMode = 'local_empty';
+            sourceMessage = `当前分类「${moduleName || '未命名分类'}」暂无可用题目，请切换其他分类；不会使用其他科目题目代替。`;
+            return { questions: [], sourceMode, sourceMessage };
+        }
+        let cloned = _.cloneDeep(filtered);
         if (cloned.length > 1 && batchNum > 0) {
             let offset = batchNum % cloned.length;
             cloned = cloned.slice(offset).concat(cloned.slice(0, offset));
@@ -585,11 +625,328 @@ function getEssayQuestions(filterType) {
     return ESSAY_QUESTIONS;
 }
 
+// ======================== 粉笔在线申论题库 ========================
+// 接口链路（已实测验证）：papers/v2 目录 → POST exercises(type=1,paperId) 创建练习
+// → combine/exercise/getExercise 取 staticUrl → combine/static/exercise 取整卷材料与题目
+// → api/shenlun/solutions?ids= 取参考答案（无需交卷）。
+const SHENLUN_WEB_QUERY = 'app=web&kav=121&av=121&hav=121&version=3.0.0.0';
+
+// 会话内缓存：目录与整卷内容基本不变，避免反复创建练习触发风控
+const shenlunCache = {
+    papers: null,          // 在线套卷目录（全量）
+    papersAt: 0,
+    labels: null,          // 考区标签（国考/各省/专项）
+    labelsAt: 0,
+    labelPapers: new Map(), // labelId -> { papers, total, at }
+    papersByKey: new Map(), // paperId -> { questions, at }
+    paperById: new Map()    // paperId -> 目录条目（供直链取卷）
+};
+const SHENLUN_CACHE_TTL = 10 * 60 * 1000;
+
+function stripHtml(html) {
+    return String(html || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+// 题干含“问题/原因/影响”等要素识别题型，与本地五分类对齐
+function inferEssayType(content, score) {
+    const text = stripHtml(content);
+    if (score >= 30 || /写一篇|文章|议论文|自选角度|自拟题目/.test(text)) return { type: 'essay', typeName: '文章写作' };
+    if (/短评|倡议书|讲话稿|宣传稿|通知|方案|简报|报道|导言|编者按|公开信|建议书/.test(text)) return { type: 'official_doc', typeName: '公文写作' };
+    if (/对策|建议|措施|改进|解决.*问题/.test(text) && !/概括|梳理|归纳/.test(text)) return { type: 'countermeasure', typeName: '提出对策' };
+    if (/谈谈.*理解|谈谈.*看法|解释|评析|分析.*观点|认识/.test(text)) return { type: 'analysis', typeName: '综合分析' };
+    return { type: 'summary', typeName: '归纳概括' };
+}
+
+async function fetchShenlunPapers(cookie) {
+    const now = Date.now();
+    if (shenlunCache.papers && now - shenlunCache.papersAt < SHENLUN_CACHE_TTL) {
+        return shenlunCache.papers;
+    }
+    // 全量目录按 50/页 并发拉齐（实测 233 套 5 页），页数以首页 pageInfo 为准
+    const first = await httpRequest({
+        url: `https://tiku.fenbi.com/api/shenlun/papers/v2?toPage=0&pageSize=50&${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 8000
+    });
+    let list = Array.isArray(first && first.list) ? first.list : [];
+    const totalPage = Math.min(20, Number(first && first.pageInfo && first.pageInfo.totalPage) || 1);
+    if (totalPage > 1) {
+        const rest = await Promise.all(
+            Array.from({ length: totalPage - 1 }, (_, i) => httpRequest({
+                url: `https://tiku.fenbi.com/api/shenlun/papers/v2?toPage=${i + 1}&pageSize=50&${SHENLUN_WEB_QUERY}`,
+                method: 'GET',
+                json: true,
+                headers: { ...headers, cookie },
+                timeout: 8000
+            }).catch(() => null))
+        );
+        rest.forEach(r => { if (r && Array.isArray(r.list)) list = list.concat(r.list); });
+    }
+    list = list.filter(p => p && p.id);
+    shenlunCache.papers = list;
+    shenlunCache.papersAt = now;
+    list.forEach(p => shenlunCache.paperById.set(String(p.id), p));
+    return list;
+}
+
 /**
- * 获取单道申论题目详情
+ * 考区标签列表（国考/各省/选调生等，实测 37 个）。
+ * subLabels.paperIds 与 papers/v2 目录不同域，分组必须走 labelId 查询。
+ */
+async function fetchShenlunLabels(cookie) {
+    const now = Date.now();
+    if (shenlunCache.labels && now - shenlunCache.labelsAt < SHENLUN_CACHE_TTL) {
+        return shenlunCache.labels;
+    }
+    const res = await httpRequest({
+        url: `https://tiku.fenbi.com/api/shenlun/subLabels?${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 8000
+    });
+    const labels = (Array.isArray(res) ? res : [])
+        .filter(l => l && l.id)
+        .map(l => ({ id: l.id, name: l.name, paperCount: (l.labelMeta && l.labelMeta.paperCount) || 0 }));
+    shenlunCache.labels = labels;
+    shenlunCache.labelsAt = now;
+    return labels;
+}
+
+/**
+ * 某考区标签下的套卷目录（分页拉齐，供选卷界面）
+ */
+async function fetchShenlunLabelPapers(labelId, cookie) {
+    const key = String(labelId);
+    const cached = shenlunCache.labelPapers.get(key);
+    if (cached && Date.now() - cached.at < SHENLUN_CACHE_TTL) {
+        return cached.papers;
+    }
+    const first = await httpRequest({
+        url: `https://tiku.fenbi.com/api/shenlun/papers/v2?toPage=0&pageSize=50&labelId=${encodeURIComponent(labelId)}&${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 8000
+    });
+    let list = Array.isArray(first && first.list) ? first.list : [];
+    const totalPage = Math.min(20, Number(first && first.pageInfo && first.pageInfo.totalPage) || 1);
+    if (totalPage > 1) {
+        const rest = await Promise.all(
+            Array.from({ length: totalPage - 1 }, (_, i) => httpRequest({
+                url: `https://tiku.fenbi.com/api/shenlun/papers/v2?toPage=${i + 1}&pageSize=50&labelId=${encodeURIComponent(labelId)}&${SHENLUN_WEB_QUERY}`,
+                method: 'GET',
+                json: true,
+                headers: { ...headers, cookie },
+                timeout: 8000
+            }).catch(() => null))
+        );
+        rest.forEach(r => { if (r && Array.isArray(r.list)) list = list.concat(r.list); });
+    }
+    list = list.filter(p => p && p.id)
+        .map(p => ({ id: p.id, name: p.name, date: p.date || '' }));
+    shenlunCache.labelPapers.set(key, { papers: list, at: Date.now() });
+    list.forEach(p => shenlunCache.paperById.set(String(p.id), p));
+    return list;
+}
+
+// 拉取一套完整申论卷（材料+题目+参考答案），拆分为独立题目
+async function fetchShenlunPaperQuestions(paper, cookie) {
+    const cacheKey = String(paper.id);
+    const cached = shenlunCache.papersByKey.get(cacheKey);
+    if (cached && Date.now() - cached.at < SHENLUN_CACHE_TTL) {
+        return cached.questions;
+    }
+
+    // 优先复用未完成练习，避免重复创建
+    let combineKey = '';
+    const unfinished = await httpRequest({
+        url: `https://tiku.fenbi.com/api/shenlun/category-exercises-unfinished?${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 6000
+    }).catch(() => null);
+    if (unfinished && unfinished.combineKey && unfinished.sheetType === 1) {
+        // 仅当未完成练习就是目标卷时复用；否则新建
+        const exCheck = await httpRequest({
+            url: `https://tiku.fenbi.com/combine/exercise/getExercise?format=html&key=${unfinished.combineKey}&routecs=shenlun&${SHENLUN_WEB_QUERY}`,
+            method: 'GET',
+            json: true,
+            headers: { ...headers, cookie },
+            timeout: 8000
+        }).catch(() => null);
+        const checkData = exCheck && (exCheck.data || exCheck);
+        if (checkData && checkData.name === paper.name) {
+            combineKey = unfinished.combineKey;
+        }
+    }
+    if (!combineKey) {
+        const created = await httpRequest({
+            url: `https://tiku.fenbi.com/api/shenlun/exercises?${SHENLUN_WEB_QUERY}`,
+            method: 'POST',
+            body: `type=1&paperId=${encodeURIComponent(paper.id)}&exerciseTimeMode=2`,
+            json: true,
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', cookie },
+            timeout: 10000
+        });
+        combineKey = created && created.key;
+    }
+    if (!combineKey) return [];
+
+    const ex = await httpRequest({
+        url: `https://tiku.fenbi.com/combine/exercise/getExercise?format=html&key=${combineKey}&routecs=shenlun&${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 8000
+    });
+    const exData = ex && (ex.data || ex);
+    const staticUrl = exData && exData.staticUrl && exData.staticUrl.urls && exData.staticUrl.urls[0];
+    if (!staticUrl) return [];
+
+    const full = await httpRequest({
+        url: `${staticUrl}&routecs=shenlun&type=1&${SHENLUN_WEB_QUERY}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 15000
+    });
+    const rawQuestions = Array.isArray(full && full.questions) ? full.questions : [];
+    const rawMaterials = Array.isArray(full && full.materials) ? full.materials : [];
+    if (rawQuestions.length === 0) return [];
+
+    // materialIndexes(数字) 与 materials[].globalId(字符串) 不同域，
+    // 按 card 顺序对齐：第 i 个题节点的 materialKeys 对应第 i 题引用的材料
+    const materialByGlobalId = new Map(rawMaterials.map(m => [m.globalId, stripHtml(m.content)]));
+    const cardNodes = ((full.card && full.card.children) || [])
+        .flatMap(ch => ch.children || [])
+        .filter(n => n && n.nodeType === 2);
+
+    const qids = rawQuestions.map(q => q.id).filter(Boolean);
+    const solutions = qids.length > 0
+        ? await httpRequest({
+            url: `https://tiku.fenbi.com/api/shenlun/solutions?ids=${qids.join(',')}&app=web`,
+            method: 'GET',
+            json: true,
+            headers: { ...headers, cookie },
+            timeout: 10000
+        }).catch(() => [])
+        : [];
+    const solutionById = new Map((Array.isArray(solutions) ? solutions : []).filter(Boolean).map(s => [s.id, s]));
+
+    const questions = rawQuestions.map((q, idx) => {
+        const acc = (q.accessories && q.accessories[0]) || {};
+        const score = Number(acc.score) || 20;
+        const wordCount = Number(acc.wordCount) || 300;
+        const { type, typeName } = inferEssayType(q.content, score);
+        const keys = (cardNodes[idx] && cardNodes[idx].materialKeys) || [];
+        const materials = keys.map(k => materialByGlobalId.get(k)).filter(Boolean);
+        const sol = solutionById.get(q.id);
+        const refAcc = sol && (sol.solutionAccessories || []).find(a => a && a.label === 'reference');
+        const contentText = stripHtml(q.content);
+        // 题干第一段为问题，其余为作答要求
+        const lines = contentText.split('\n').map(s => s.trim()).filter(Boolean);
+        return {
+            id: `fb-${q.id}`,
+            type,
+            typeName,
+            examName: paper.name,
+            title: lines[0] || contentText,
+            requirement: lines.slice(1).join(' ') || `不超过${wordCount}字`,
+            maxScore: score,
+            maxWords: wordCount,
+            materials: materials.length > 0 ? materials : rawMaterials.map(m => stripHtml(m.content)),
+            standardAnswer: refAcc ? stripHtml(refAcc.content) : '',
+            scoringPoints: [],
+            online: true
+        };
+    }).filter(q => q.materials.length > 0);
+
+    shenlunCache.papersByKey.set(cacheKey, { questions, at: Date.now() });
+    return questions;
+}
+
+/**
+ * 获取申论题库列表（含在线套卷，与行测同模式：在线优先，本地兜底）
+ * opts.paperId 指定展开的在线卷；缺省取目录最新一套
+ */
+async function getEssayQuestionsWithMeta(filterType, cookie, opts = {}) {
+    let onlineQuestions = [];
+    let sourceMode = 'local_no_cookie';
+    let sourceMessage = '当前未检测到粉笔登录 Cookie，已加载本地精选真题库（如需同步粉笔在线套卷，请前往配置中心导入）。';
+    let activePaperId = '';
+
+    if (cookie) {
+        try {
+            let paper = null;
+            if (opts.paperId) {
+                // 选卷直链：优先目录缓存，未命中时按 labelId 查询过的条目兜底
+                paper = shenlunCache.paperById.get(String(opts.paperId)) || null;
+                if (!paper) {
+                    const papers = await fetchShenlunPapers(cookie);
+                    paper = papers.find(p => String(p.id) === String(opts.paperId)) || null;
+                }
+                if (!paper) {
+                    // 不在默认目录的卷（如小模考/各省专项）：仅凭 id 也可创建练习
+                    paper = { id: opts.paperId, name: '' };
+                }
+            } else {
+                const papers = await fetchShenlunPapers(cookie);
+                paper = papers[0] || null;
+            }
+            if (paper) {
+                onlineQuestions = await fetchShenlunPaperQuestions(paper, cookie);
+                if (onlineQuestions.length > 0 && !paper.name) {
+                    paper.name = onlineQuestions[0].examName;
+                }
+            }
+            if (onlineQuestions.length > 0) {
+                activePaperId = String(paper.id);
+                sourceMode = 'online';
+                sourceMessage = `已连接粉笔在线题库（${paper.name || '所选套卷'}，共 ${onlineQuestions.length} 题），并保留本地精选真题。`;
+            } else {
+                sourceMode = 'local_empty';
+                sourceMessage = '粉笔账号下暂未拉取到所选在线申论套卷（可能 Cookie 已过期或接口受限），已自动切换为本地精选真题库。';
+            }
+        } catch (e) {
+            console.warn('Fetch online shenlun papers failed, falling back to local dataset:', e.message || e);
+            sourceMode = 'local_fallback';
+            sourceMessage = `粉笔在线题库拉取失败（${e.message || e}），已自动降级为本地精选真题库。`;
+        }
+    }
+
+    let all = onlineQuestions.concat(ESSAY_QUESTIONS);
+    if (filterType && filterType !== 'all') {
+        all = all.filter(q => q.type === filterType);
+    }
+    return { questions: all, sourceMode, sourceMessage, activePaperId };
+}
+
+/**
+ * 获取单道申论题目详情（支持在线题 fb- 前缀，在线题从缓存取）
  */
 function getEssayQuestionById(id) {
-    return ESSAY_QUESTIONS.find(q => q.id === id) || ESSAY_QUESTIONS[0];
+    const local = ESSAY_QUESTIONS.find(q => q.id === id);
+    if (local) return local;
+    for (const entry of shenlunCache.papersByKey.values()) {
+        const found = entry.questions.find(q => q.id === id);
+        if (found) return found;
+    }
+    return ESSAY_QUESTIONS[0];
 }
 
 module.exports = {
@@ -597,5 +954,9 @@ module.exports = {
     getXingceQuestions,
     getXingceQuestionsWithMeta,
     getEssayQuestions,
-    getEssayQuestionById
+    getEssayQuestionsWithMeta,
+    getEssayQuestionById,
+    fetchShenlunPapers,
+    fetchShenlunLabels,
+    fetchShenlunLabelPapers
 };
