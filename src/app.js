@@ -273,9 +273,18 @@ router.get('/practice/essay', async ctx => {
     const cookie = getEffectiveCookie(ctx);
     const result = await practiceService.getEssayQuestionsWithMeta(type, cookie, { paperId });
     let questionList = result.questions;
-    let currentQuestion = qid
-        ? practiceService.getEssayQuestionById(qid)
-        : (questionList[0] || practiceService.getEssayQuestions('all')[0]);
+    let currentQuestion = null;
+    let invalidQid = false;
+    if (qid) {
+        currentQuestion = practiceService.getEssayQuestionById(qid);
+        if (!currentQuestion) {
+            invalidQid = true;
+            currentQuestion = questionList[0] || null;
+        }
+    } else {
+        currentQuestion = questionList[0] || null;
+    }
+    if (!currentQuestion) currentQuestion = practiceService.getEssayQuestions('all')[0];
 
     await ctx.render('practice-essay', {
         currentType: type,
@@ -283,7 +292,9 @@ router.get('/practice/essay', async ctx => {
         currentQuestion,
         sourceMode: result.sourceMode,
         sourceMessage: result.sourceMessage,
-        activePaperId: result.activePaperId
+        activePaperId: result.activePaperId,
+        loadedPapers: result.loadedPapers || [],
+        invalidQid
     });
 });
 

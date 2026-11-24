@@ -422,18 +422,21 @@
 </div>
 
 <div class="sub-nav">
+    <% const paperParam = (typeof activePaperId !== 'undefined' && activePaperId) ? `&paperId=${encodeURIComponent(activePaperId)}` : ''; %>
     <div class="type-tabs">
-        <a href="/practice/essay?type=all" class="type-btn <%= currentType === 'all' ? 'active' : '' %>">全部题目</a>
-        <a href="/practice/essay?type=summary" class="type-btn <%= currentType === 'summary' ? 'active' : '' %>">归纳概括 (单一题)</a>
-        <a href="/practice/essay?type=analysis" class="type-btn <%= currentType === 'analysis' ? 'active' : '' %>">综合分析</a>
-        <a href="/practice/essay?type=countermeasure" class="type-btn <%= currentType === 'countermeasure' ? 'active' : '' %>">提出对策</a>
-        <a href="/practice/essay?type=official_doc" class="type-btn <%= currentType === 'official_doc' ? 'active' : '' %>">公文写作</a>
-        <a href="/practice/essay?type=essay" class="type-btn <%= currentType === 'essay' ? 'active' : '' %>">文章写作 (大作文)</a>
+        <a href="/practice/essay?type=all<%= paperParam %>" class="type-btn <%= currentType === 'all' ? 'active' : '' %>">全部题目</a>
+        <a href="/practice/essay?type=summary<%= paperParam %>" class="type-btn <%= currentType === 'summary' ? 'active' : '' %>">归纳概括 (单一题)</a>
+        <a href="/practice/essay?type=analysis<%= paperParam %>" class="type-btn <%= currentType === 'analysis' ? 'active' : '' %>">综合分析</a>
+        <a href="/practice/essay?type=countermeasure<%= paperParam %>" class="type-btn <%= currentType === 'countermeasure' ? 'active' : '' %>">提出对策</a>
+        <a href="/practice/essay?type=official_doc<%= paperParam %>" class="type-btn <%= currentType === 'official_doc' ? 'active' : '' %>">公文写作</a>
+        <a href="/practice/essay?type=essay<%= paperParam %>" class="type-btn <%= currentType === 'essay' ? 'active' : '' %>">文章写作 (大作文)</a>
     </div>
 
     <div style="display: flex; align-items: center; gap: 10px;">
         <button type="button" class="type-btn" onclick="openPaperPicker()">在线选卷</button>
         <button type="button" class="type-btn" onclick="openEssayHistory()">历史批改记录</button>
+        <button type="button" class="type-btn" onclick="switchRelativeQuestion(-1)">← 上一题</button>
+        <button type="button" class="type-btn" onclick="switchRelativeQuestion(1)">下一题 →</button>
         <select id="examSelect" onchange="switchQuestion()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #d9d9d9; font-size: 13px; max-width: 340px;">
             <% for (let q of questionList) { %>
                 <option value="<%= q.id %>" <%= q.id === currentQuestion.id ? 'selected' : '' %>>
@@ -478,12 +481,13 @@
         </div>
         <div class="material-body" id="materialArea">
             <% currentQuestion.materials.forEach((mat, idx) => { %>
-                <div class="material-card">
-                    <div class="material-num">给定资料 <%= idx + 1 %></div>
+                <% const matObj = (mat && typeof mat === 'object') ? mat : { ordinal: idx + 1, content: mat }; %>
+                <div class="material-card" data-ordinal="<%= matObj.ordinal %>">
+                    <div class="material-num">给定资料 <%= matObj.ordinal %></div>
                     <% if (currentQuestion.online) { %>
-                        <p style="white-space: pre-wrap;"><%= mat %></p>
+                        <p style="white-space: pre-wrap;"><%= matObj.content %></p>
                     <% } else { %>
-                        <p><%- mat.replace(/\n/g, '<br>') %></p>
+                        <p><%- String(matObj.content).replace(/\n/g, '<br>') %></p>
                     <% } %>
                 </div>
             <% }) %>
@@ -580,6 +584,12 @@
 
 <script>
     const currentQ = <%- JSON.stringify(currentQuestion).replace(/</g, '\\u003c') %>;
+    const questionNav = <%- JSON.stringify(questionList.map(q => ({ id: q.id, paperId: q.paperId || null }))).replace(/</g, '\\u003c') %>;
+    // AI 批改提交时材料统一转成字符串（在线题带 {ordinal, content}，本地题为字符串）
+    const materialTexts = (currentQ.materials || []).map(m => (m && typeof m === 'object') ? m.content : m);
+    <% if (typeof invalidQid !== 'undefined' && invalidQid) { %>
+    showToast('所选题目已失效或不在已加载的卷中，已切换到本题');
+    <% } %>
     const editor = document.getElementById('essayEditor');
     const wordCounter = document.getElementById('wordCount');
     const draftNotice = document.getElementById('draftNotice');
@@ -636,12 +646,30 @@
         });
     }
 
-    function switchQuestion() {
-        const qid = document.getElementById('examSelect').value;
+    function goToQuestion(qid, paperId) {
         const urlParams = new URLSearchParams(window.location.search);
         const type = urlParams.get('type') || 'all';
-        const paperId = urlParams.get('paperId');
-        window.location.href = `/practice/essay?type=${type}&qid=${qid}${paperId ? `&paperId=${paperId}` : ''}`;
+        const pid = paperId || urlParams.get('paperId');
+        window.location.href = `/practice/essay?type=${type}&qid=${encodeURIComponent(qid)}${pid ? `&paperId=${encodeURIComponent(pid)}` : ''}`;
+    }
+
+    function switchQuestion() {
+        const qid = document.getElementById('examSelect').value;
+        const item = questionNav.find(q => String(q.id) === String(qid));
+        goToQuestion(qid, item && item.paperId);
+    }
+
+    // 按题库顺序切换到上一题/下一题，到边界时给出提示
+    function switchRelativeQuestion(step) {
+        const idx = questionNav.findIndex(q => String(q.id) === String(currentQ.id));
+        if (idx < 0) return;
+        const next = idx + step;
+        if (next < 0 || next >= questionNav.length) {
+            showToast(step > 0 ? '已经是最后一题' : '已经是第一题');
+            return;
+        }
+        const item = questionNav[next];
+        goToQuestion(item.id, item.paperId);
     }
 
     // ======================== 在线选卷 ========================
@@ -776,11 +804,12 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     questionId: currentQ.id,
+                    paperId: currentQ.paperId || new URLSearchParams(window.location.search).get('paperId') || '',
                     questionType: currentQ.type,
                     questionTitle: currentQ.title,
                     questionRequirement: currentQ.requirement,
                     maxScore: currentQ.maxScore,
-                    materials: currentQ.materials,
+                    materials: materialTexts,
                     standardAnswer: currentQ.standardAnswer,
                     scoringPoints: currentQ.scoringPoints,
                     userAnswer: text
@@ -970,6 +999,10 @@
                 card.appendChild(snippet);
 
                 card.onclick = () => {
+                    if (rec.questionId) {
+                        goToQuestion(rec.questionId, rec.paperId);
+                        return;
+                    }
                     if (rec.userAnswer) {
                         editor.value = rec.userAnswer;
                         updateWordCount();
