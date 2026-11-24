@@ -3,6 +3,7 @@
  */
 
 const { httpRequest } = require('../util/httpUtil');
+const xingceDoneService = require('./xingceDoneService');
 const _ = require('lodash');
 
 let headers = {
@@ -414,29 +415,7 @@ async function fetchSolutionsByIds(qids, cookie, moduleId, moduleName) {
         .map((q, idx) => ({ ...q, idx: idx + 1 }));
 }
 
-async function fetchFromUserExercises(catId, moduleName, batchNum, cookie, count) {
-    const listResult = await httpRequest({
-        url: `https://tiku.fenbi.com/api/xingce/category-exercises?categoryId=${encodeURIComponent(catId || '1')}&cursor=0&count=${count}`,
-        method: 'GET',
-        json: true,
-        headers: { ...headers, cookie },
-        timeout: 5000
-    }).catch(() => null);
-
-    const allExercises = listResult && Array.isArray(listResult.datas) ? listResult.datas : [];
-    if (allExercises.length === 0) return null;
-
-    const meta = inferModuleMeta(catId, moduleName);
-    const matched = allExercises.filter(ex => {
-        const sName = (ex && ex.sheet && ex.sheet.name) || '';
-        return sName.includes(meta.match);
-    });
-    // 只有命中当前模块的练习才直接复用；若没有命中，不强行拿其他模块的历史练习凑数
-    if (matched.length === 0) return null;
-
-    const picked = matched[batchNum % matched.length];
-    if (!picked || !picked.id) return null;
-
+async function loadExerciseQuestions(picked, catId, moduleName, cookie) {
     const [exDetail, exReport] = await Promise.all([
         httpRequest({
             url: `https://tiku.fenbi.com/api/xingce/exercises/${picked.id}`,
@@ -463,14 +442,45 @@ async function fetchFromUserExercises(catId, moduleName, batchNum, cookie, count
         qids = Object.values(exDetail.userAnswers).map(u => u && u.questionId).filter(Boolean);
     }
 
-    if (qids.length === 0) return null;
-    const questions = await fetchSolutionsByIds(qids, cookie, catId, moduleName);
-    if (questions.length === 0) return null;
+    if (qids.length === 0) return [];
+    return fetchSolutionsByIds(qids, cookie, catId, moduleName);
+}
 
-    return {
-        questions,
-        sheetName: (picked.sheet && picked.sheet.name) || '粉笔真题练习'
-    };
+async function fetchFromUserExercises(catId, moduleName, batchNum, cookie, count) {
+    const listResult = await httpRequest({
+        url: `https://tiku.fenbi.com/api/xingce/category-exercises?categoryId=${encodeURIComponent(catId || '1')}&cursor=0&count=${count}`,
+        method: 'GET',
+        json: true,
+        headers: { ...headers, cookie },
+        timeout: 5000
+    }).catch(() => null);
+
+    const allExercises = listResult && Array.isArray(listResult.datas) ? listResult.datas : [];
+    if (allExercises.length === 0) return null;
+
+    const meta = inferModuleMeta(catId, moduleName);
+    const matched = allExercises.filter(ex => {
+        const sName = (ex && ex.sheet && ex.sheet.name) || '';
+        return sName.includes(meta.match);
+    });
+    // 只有命中当前模块的练习才直接复用；若没有命中，不强行拿其他模块的历史练习凑数
+    if (matched.length === 0) return null;
+
+    // 首屏按历史顺序复用当前模块的练习，但跳过已全部做完的那一套，
+    // 否则路由的 filterUndone 会把题目全部过滤掉，误报“当前分类暂无可用题目”。
+    const start = batchNum % matched.length;
+    for (let i = 0; i < matched.length; i++) {
+        const picked = matched[(start + i) % matched.length];
+        if (!picked || !picked.id) continue;
+        const questions = await loadExerciseQuestions(picked, catId, moduleName, cookie);
+        const undone = xingceDoneService.filterUndone(questions);
+        if (undone.length === 0) continue;
+        return {
+            questions: undone,
+            sheetName: (picked.sheet && picked.sheet.name) || '粉笔真题练习'
+        };
+    }
+    return null;
 }
 
 async function fetchFromNewExercise(catId, moduleName, cookie, count) {
@@ -639,7 +649,8 @@ const shenlunCache = {
     labelsAt: 0,
     labelPapers: new Map(), // labelId -> { papers, total, at }
     papersByKey: new Map(), // paperId -> { questions, at }
-    paperById: new Map()    // paperId -> 目录条目（供直链取卷）
+    paperById: new Map(),   // paperId -> 目录条目（供直链取卷）
+    loadedByPaper: new Map() // paperId -> 已加载题目（跨题型的会话内累积，保留多卷可切换）
 };
 const SHENLUN_CACHE_TTL = 10 * 60 * 1000;
 
@@ -830,8 +841,13 @@ async function fetchShenlunPaperQuestions(paper, cookie) {
     if (rawQuestions.length === 0) return [];
 
     // materialIndexes(数字) 与 materials[].globalId(字符串) 不同域，
-    // 按 card 顺序对齐：第 i 个题节点的 materialKeys 对应第 i 题引用的材料
-    const materialByGlobalId = new Map(rawMaterials.map(m => [m.globalId, stripHtml(m.content)]));
+    // 按 card 顺序对齐：第 i 个题节点的 materialKeys 对应第 i 题引用的材料。
+    // 材料在整卷中的序号即“给定资料N”，必须随题目带到前端，避免重新编号导致题干与材料错位。
+    const materialByGlobalId = new Map(rawMaterials.map((m, idx) => [m.globalId, {
+        ordinal: idx + 1,
+        content: stripHtml(m.content)
+    }]));
+    const materialByOrdinal = new Map([...materialByGlobalId.values()].map(m => [m.ordinal, m]));
     const cardNodes = ((full.card && full.card.children) || [])
         .flatMap(ch => ch.children || [])
         .filter(n => n && n.nodeType === 2);
@@ -854,7 +870,13 @@ async function fetchShenlunPaperQuestions(paper, cookie) {
         const wordCount = Number(acc.wordCount) || 300;
         const { type, typeName } = inferEssayType(q.content, score);
         const keys = (cardNodes[idx] && cardNodes[idx].materialKeys) || [];
-        const materials = keys.map(k => materialByGlobalId.get(k)).filter(Boolean);
+        // 按题干引用顺序保留真实材料序号（如资料1-3、资料8、大作文全篇），
+        // 而非 filtered 后重新从1编号，确保“给定资料N”与题干一致。
+        const orderedKeys = keys.length > 0 ? keys : rawMaterials.map(m => m.globalId);
+        const materials = orderedKeys
+            .map(k => materialByGlobalId.get(k))
+            .filter(Boolean)
+            .sort((a, b) => a.ordinal - b.ordinal);
         const sol = solutionById.get(q.id);
         const refAcc = sol && (sol.solutionAccessories || []).find(a => a && a.label === 'reference');
         const contentText = stripHtml(q.content);
@@ -862,6 +884,7 @@ async function fetchShenlunPaperQuestions(paper, cookie) {
         const lines = contentText.split('\n').map(s => s.trim()).filter(Boolean);
         return {
             id: `fb-${q.id}`,
+            paperId: String(paper.id),
             type,
             typeName,
             examName: paper.name,
@@ -869,7 +892,7 @@ async function fetchShenlunPaperQuestions(paper, cookie) {
             requirement: lines.slice(1).join(' ') || `不超过${wordCount}字`,
             maxScore: score,
             maxWords: wordCount,
-            materials: materials.length > 0 ? materials : rawMaterials.map(m => stripHtml(m.content)),
+            materials: materials.length > 0 ? materials : [...materialByOrdinal.values()].sort((a, b) => a.ordinal - b.ordinal),
             standardAnswer: refAcc ? stripHtml(refAcc.content) : '',
             scoringPoints: [],
             online: true
@@ -877,6 +900,7 @@ async function fetchShenlunPaperQuestions(paper, cookie) {
     }).filter(q => q.materials.length > 0);
 
     shenlunCache.papersByKey.set(cacheKey, { questions, at: Date.now() });
+    shenlunCache.loadedByPaper.set(cacheKey, questions);
     return questions;
 }
 
@@ -929,11 +953,29 @@ async function getEssayQuestionsWithMeta(filterType, cookie, opts = {}) {
         }
     }
 
-    let all = onlineQuestions.concat(ESSAY_QUESTIONS);
+    // 当前卷题目优先，其后拼接会话内已加载过的其他卷题目（按题 id 去重），
+    // 保证下拉框可在多套卷之间切换，而不必每次重新选卷。
+    let all = [];
+    const seen = new Set();
+    const addUnique = list => list.forEach(q => {
+        if (q && q.id && !seen.has(q.id)) {
+            seen.add(q.id);
+            all.push(q);
+        }
+    });
+    addUnique(onlineQuestions);
+    for (const [paperId, loaded] of shenlunCache.loadedByPaper) {
+        if (paperId !== activePaperId) addUnique(loaded);
+    }
+    addUnique(ESSAY_QUESTIONS);
     if (filterType && filterType !== 'all') {
         all = all.filter(q => q.type === filterType);
     }
-    return { questions: all, sourceMode, sourceMessage, activePaperId };
+    const loadedPapers = [...shenlunCache.loadedByPaper.keys()].map(pid => {
+        const p = shenlunCache.paperById.get(pid);
+        return { id: pid, name: (p && p.name) || (shenlunCache.loadedByPaper.get(pid)[0] || {}).examName || pid };
+    });
+    return { questions: all, sourceMode, sourceMessage, activePaperId, loadedPapers };
 }
 
 /**
@@ -946,7 +988,7 @@ function getEssayQuestionById(id) {
         const found = entry.questions.find(q => q.id === id);
         if (found) return found;
     }
-    return ESSAY_QUESTIONS[0];
+    return null;
 }
 
 module.exports = {

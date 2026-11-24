@@ -356,6 +356,59 @@ test('行测历史练习复用不会把常识判断误当成判断推理', async
     }
 });
 
+test('行测首屏复用历史练习时跳过已做完的练习', async () => {
+    const httpUtil = require('../src/util/httpUtil');
+    const xingceDoneService = require('../src/service/xingceDoneService');
+    const originalHttp = httpUtil.httpRequest;
+    const originalDoneFile = process.env.FENBI_DATA_DIR;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fenbi-done-'));
+    process.env.FENBI_DATA_DIR = tmpDir;
+
+    const exercises = [
+        { id: 'old', sheet: { name: '专项智能练习（判断推理）' } },
+        { id: 'fresh', sheet: { name: '专项智能练习（判断推理）' } }
+    ];
+    const reportByExercise = {
+        old: [{ questionId: 'q-done' }],
+        fresh: [{ questionId: 'q-new' }]
+    };
+    const questionById = {
+        'q-done': { id: 'q-done', content: '良法 : 善治' },
+        'q-new': { id: 'q-new', content: '由此可以推出' }
+    };
+    httpUtil.httpRequest = async function (opts) {
+        if (/category-exercises/.test(opts.url)) return { datas: exercises };
+        const reportMatch = /exercises\/(old|fresh)\/report/.exec(opts.url);
+        if (reportMatch) return { answers: reportByExercise[reportMatch[1]] };
+        if (/solutions\?ids=/.test(opts.url)) {
+            return opts.url.split('ids=')[1].split(',').map(id => {
+                const q = questionById[id];
+                return { id: q.id, content: q.content, accessories: [{ options: ['A', 'B', 'C', 'D'] }], correctAnswer: { choice: 0 } };
+            });
+        }
+        return null;
+    };
+
+    const psPath = require.resolve('../src/service/practiceService');
+    const cachedPs = require.cache[psPath];
+    delete require.cache[psPath];
+    const ps = require('../src/service/practiceService');
+
+    try {
+        xingceDoneService.addDoneIds(['q-done']);
+        const result = await ps.getXingceQuestionsWithMeta({ moduleId: 783924, moduleName: '判断推理', batch: 0 }, 'test-cookie');
+        assert.equal(result.sourceMode, 'online');
+        assert.deepEqual(result.questions.map(q => q.id), ['q-new']);
+    } finally {
+        httpUtil.httpRequest = originalHttp;
+        delete require.cache[psPath];
+        if (cachedPs) require.cache[psPath] = cachedPs;
+        if (originalDoneFile === undefined) delete process.env.FENBI_DATA_DIR;
+        else process.env.FENBI_DATA_DIR = originalDoneFile;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
 test('loginService 会话持久化与清理', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fenbi-sess-'));
     const prevEnv = process.env.FENBI_DATA_DIR;
@@ -468,6 +521,88 @@ test('practice-essay.ejs 渲染在线题与来源提示不抛错且转义材料'
         currentQuestion: onlineQuestion
     });
     assert.ok(html2.includes('本地精选真题库'));
+
+    // 在线材料带真实给定资料序号，按 ordinal 显示而非重新编号
+    const numberedQuestion = {
+        ...onlineQuestion,
+        id: 'fb-1002',
+        materials: [{ ordinal: 3, content: '第三段资料' }],
+        paperId: '7977315'
+    };
+    const html3 = await ejs.renderFile(path.join(__dirname, '../src/views/practice-essay.ejs'), {
+        currentType: 'all',
+        questionList: [numberedQuestion],
+        currentQuestion: numberedQuestion,
+        activePaperId: '7977315'
+    });
+    assert.ok(html3.includes('给定资料 3'));
+    assert.ok(html3.includes('data-ordinal="3"'));
+    // 题型切换保留当前卷
+    assert.ok(html3.includes('type=all&amp;paperId=7977315'));
+    // 切题入口存在
+    assert.ok(html3.includes('questionNav'));
+    assert.ok(html3.includes('下一题 →'));
+});
+
+test('getEssayQuestionById 对失效题号返回 null 而非静默跳转到第一题', () => {
+    assert.equal(practiceService.getEssayQuestionById('fb-not-exist-99999'), null);
+});
+
+test('在线申论多卷累积：加载新卷后仍可切换到已加载旧卷的题目', async () => {
+    const httpUtil = require('../src/util/httpUtil');
+    const original = httpUtil.httpRequest;
+    // 构造两套卷，材料各带序号；mock 粉笔整卷接口链路
+    const PAPERS = {
+        '111': { questions: [{ id: 9001, content: '<p>请根据给定资料1，谈谈A。</p>' }] },
+        '222': { questions: [{ id: 9002, content: '<p>请根据给定资料1，谈谈B。</p>' }] }
+    };
+    const byStaticUrl = {};
+    httpUtil.httpRequest = async function (opts) {
+        if (/papers\/v2/.test(opts.url)) {
+            const list = Object.keys(PAPERS).map(id => ({ id, name: '卷' + id }));
+            return { list, pageInfo: { totalPage: 1 } };
+        }
+        if (/shenlun\/exercises\?/.test(opts.url)) {
+            const m = opts.body.match(/paperId=(\d+)/);
+            return { key: 'key-' + (m && m[1]) };
+        }
+        if (/getExercise\?/.test(opts.url)) {
+            const m = opts.url.match(/key=key-(\d+)/);
+            return { name: '卷' + (m && m[1]), staticUrl: { urls: ['https://static.test/' + (m && m[1])] } };
+        }
+        if (/static\.test\//.test(opts.url)) {
+            const m = opts.url.match(/static\.test\/(\d+)/);
+            const paper = PAPERS[m && m[1]];
+            if (!paper) return null;
+            return {
+                questions: paper.questions,
+                materials: [{ globalId: 'g1', content: '<p>资料一</p>' }],
+                card: { children: [{ children: paper.questions.map(() => ({ nodeType: 2, materialKeys: ['g1'] })) }] }
+            };
+        }
+        if (/shenlun\/solutions\?/.test(opts.url)) return [];
+        return null;
+    };
+
+    const psPath = require.resolve('../src/service/practiceService');
+    const cachedPs = require.cache[psPath];
+    delete require.cache[psPath];
+    const svc = require('../src/service/practiceService');
+
+    try {
+        const r1 = await svc.getEssayQuestionsWithMeta('all', 'cookie', { paperId: '111' });
+        const r2 = await svc.getEssayQuestionsWithMeta('all', 'cookie', { paperId: '222' });
+        const onlineIds = r2.questions.filter(q => q.online).map(q => q.id);
+        assert.ok(onlineIds.includes('fb-9001'), '加载卷222后仍应保留卷111的题目');
+        assert.ok(onlineIds.includes('fb-9002'), '应包含当前卷222的题目');
+        assert.ok(r2.loadedPapers.some(p => p.id === '111'));
+        assert.ok(r2.loadedPapers.some(p => p.id === '222'));
+        assert.equal(svc.getEssayQuestionById('fb-9001').id, 'fb-9001');
+    } finally {
+        httpUtil.httpRequest = original;
+        delete require.cache[psPath];
+        require.cache[psPath] = cachedPs;
+    }
 });
 
 test('fetchShenlunLabels/LabelPapers 无 Cookie 时抛错而不返回假数据', async () => {

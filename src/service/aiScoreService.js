@@ -513,6 +513,7 @@ async function gradeEssay(params) {
 
     const savedRecord = saveEssayRecord({
         questionId: params.questionId || '',
+        paperId: params.paperId || '',
         questionTitle: params.questionTitle,
         questionType: params.questionType,
         userAnswer: params.userAnswer,
